@@ -53,3 +53,4 @@ Thumbs.db
 ## crypto-robot specific
 **/*.log
 /robot3/nul
+
