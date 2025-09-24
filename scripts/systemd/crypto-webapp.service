@@ -1,0 +1,48 @@
+[Unit]
+Description=Crypto Robot Web Application
+Documentation=https://github.com/your-repo/crypto-robot
+After=network.target network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=forking
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/opt/crypto-robot
+Environment=PATH=/opt/crypto-robot/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/opt/crypto-robot
+EnvironmentFile=/opt/crypto-robot/.env
+ExecStartPre=/bin/bash -c 'source /opt/crypto-robot/venv/bin/activate'
+ExecStart=/opt/crypto-robot/scripts/start-webapp-direct.sh
+ExecStop=/opt/crypto-robot/scripts/stop-webapp-direct.sh
+ExecReload=/bin/kill -HUP $MAINPID
+PIDFile=/opt/crypto-robot/webapp.pid
+Restart=always
+RestartSec=10
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/crypto-robot/logs /opt/crypto-robot/data /opt/crypto-robot/database /opt/crypto-robot/static /opt/crypto-robot/templates
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=1G
+CPUQuota=100%
+
+# Logging
+StandardOutput=append:/opt/crypto-robot/logs/webapp-systemd.log
+StandardError=append:/opt/crypto-robot/logs/webapp-systemd-error.log
+SyslogIdentifier=crypto-webapp
+
+[Install]
+WantedBy=multi-user.target

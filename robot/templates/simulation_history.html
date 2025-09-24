@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Robot - Simulation History</title>
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #333;
+            margin: 0;
+            font-size: 2.2em;
+            font-weight: 300;
+        }
+        
+        .header p {
+            color: #666;
+            margin: 10px 0 0 0;
+            font-size: 1.1em;
+        }
+        .runtime-info {
+            margin-top: 8px;
+            font-size: 0.95em;
+            color: #444;
+        }
+        .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85em;
+            padding: 4px 10px;
+            border-radius: 16px;
+            background: #eef4ff;
+            color: #1d4ed8;
+            font-weight: 500;
+        }
+        .live-indicator .pulse {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #1d4ed8;
+            animation: pulse 1.2s infinite ease-in-out;
+        }
+        .live-indicator.stuck { background:#fff4f4; color:#b91c1c; }
+        .live-indicator.stuck .pulse { background:#b91c1c; animation: none; }
+        @keyframes pulse { 0%{transform:scale(.8);opacity:.6} 50%{transform:scale(1);opacity:1} 100%{transform:scale(.8);opacity:.6} }
+        
+        .simulation-info {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        
+        .info-item {
+            text-align: center;
+        }
+        
+        .info-item .label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .info-item .value {
+            font-size: 1.3em;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .nav-links {
+            text-align: center;
+            margin-top: 30px;
+        }
+        
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin: 0 15px;
+            font-weight: 500;
+            transition: color 0.3s ease;
+            padding: 10px 20px;
+            border-radius: 25px;
+            background: #f8f9fa;
+            display: inline-block;
+        }
+        
+        .nav-links a:hover {
+            color: white;
+            background: #667eea;
+        }
+        
+        .status {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        
+        .status.completed {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .value.positive {
+            color: #28a745;
+        }
+        
+        .value.negative {
+            color: #dc3545;
+        }
+        
+        /* Portfolio popup styles */
+        .portfolio-popup {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            min-width: 500px;
+            max-width: 80vw;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .popup-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+        
+        .popup-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 15px 15px 0 0;
+            text-align: center;
+        }
+        
+        .popup-content {
+            padding: 20px;
+        }
+        
+        .crypto-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .crypto-item:last-child {
+            border-bottom: none;
+        }
+        
+        .crypto-name {
+            font-weight: 500;
+            color: #333;
+            font-size: 1.05em;
+        }
+        
+        .crypto-symbol {
+            color: #667eea;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        
+        .crypto-value {
+            font-weight: 600;
+            color: #667eea;
+        }
+        
+        .close-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 15px;
+            float: right;
+        }
+        
+        .close-btn:hover {
+            background: #c82333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📈 {{ simulation.name }}</h1>
+            <p>Portfolio Value Evolution</p>
+            <div class="runtime-info" id="runtimeInfo">
+                Runtime: <span id="elapsedTime">—</span>
+                <span id="liveIndicator" class="live-indicator" style="display:none;">
+                    <span class="pulse"></span>
+                    <span id="liveText">Running...</span>
+                </span>
+            </div>
+        </div>
+    <!-- Meta data for JS (avoid excessive Jinja in script) -->
+    <div id="simulationMeta"
+         data-simulation-id="{{ simulation.id }}"
+         data-status="{{ simulation.status }}"
+         data-created-at="{{ simulation.created_at.isoformat() if simulation.created_at else '' }}"
+         data-completed-at="{{ simulation.completed_at.isoformat() if simulation.completed_at else '' }}"
+         style="display:none;"></div>
+        
+        <div class="simulation-info">
+            <div class="info-item">
+                <div class="label">Status</div>
+                <div class="value">
+                    <span class="status {{ simulation.status }}">{{ simulation.status }}</span>
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="label">Current Cycle</div>
+                <div class="value" id="currentCycleValue">{{ simulation.current_cycle or 0 }}</div>
+            </div>
+            <div class="info-item">
+                <div class="label">Start Date</div>
+                <div class="value">{{ simulation.start_date.strftime('%d/%m/%Y') }}</div>
+            </div>
+            <div class="info-item">
+                <div class="label">Duration</div>
+                <div class="value">{{ simulation.duration_days }} days</div>
+            </div>
+            <div class="info-item">
+                <div class="label">Cycle Length</div>
+                <div class="value">{{ simulation.cycle_length_minutes }}m</div>
+            </div>
+            <div class="info-item">
+                <div class="label">Data Source</div>
+                <div class="value">
+                    {% if 'historical' in simulation.data_source %}
+                        <span style="color: #28a745; font-weight: bold;">📊 Historical Data</span>
+                    {% else %}
+                        <span style="color: #ffc107; font-weight: bold;">🎲 Simulated Data</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="label">Starting Reserve</div>
+                <div class="value">{{ "%.2f"|format(simulation.starting_reserve) }} {{ base_asset }}</div>
+            </div>
+            {% if simulation.final_portfolio_value %}
+            <div class="info-item">
+                <div class="label">Final Portfolio</div>
+                <div class="value">{{ "%.2f"|format(simulation.final_portfolio_value) }} {{ base_asset }}</div>
+            </div>
+            {% endif %}
+            {% if final_total_value_net %}
+            <div class="info-item">
+                <div class="label">Final Total (Net)</div>
+                <div class="value {% if final_total_value_net > simulation.starting_reserve %}positive{% elif final_total_value_net < simulation.starting_reserve %}negative{% endif %}">
+                    {{ "%.2f"|format(final_total_value_net) }} {{ base_asset }}
+                    {% if simulation.starting_reserve <= 0.001 %}
+                        {% if final_total_value_net > 0 %}
+                            (+∞% from 0 {{ base_asset }})
+                        {% endif %}
+                    {% elif final_total_value_net > simulation.starting_reserve %}
+                        (+{{ "%.1f"|format((final_total_value_net - simulation.starting_reserve) / simulation.starting_reserve * 100) }}%)
+                    {% elif final_total_value_net < simulation.starting_reserve %}
+                        ({{ "%.1f"|format((final_total_value_net - simulation.starting_reserve) / simulation.starting_reserve * 100) }}%)
+                    {% endif %}
+                </div>
+            </div>
+            {% elif simulation.final_total_value %}
+            <div class="info-item">
+                <div class="label">Final Total</div>
+                <div class="value {% if simulation.final_total_value > simulation.starting_reserve %}positive{% elif simulation.final_total_value < simulation.starting_reserve %}negative{% endif %}">
+                    {{ "%.2f"|format(simulation.final_total_value) }} {{ base_asset }}
+                    {% if simulation.starting_reserve <= 0.001 %}
+                        {% if simulation.final_total_value > 0 %}
+                            (+∞% from 0 {{ base_asset }})
+                        {% endif %}
+                    {% elif simulation.final_total_value > simulation.starting_reserve %}
+                        (+{{ "%.1f"|format((simulation.final_total_value - simulation.starting_reserve) / simulation.starting_reserve * 100) }}%)
+                    {% elif simulation.final_total_value < simulation.starting_reserve %}
+                        ({{ "%.1f"|format((simulation.final_total_value - simulation.starting_reserve) / simulation.starting_reserve * 100) }}%)
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {% if total_fees %}
+            <div class="info-item">
+                <div class="label">Total Fees</div>
+                <div class="value" style="color: #dc3545;">-{{ "%.2f"|format(total_fees) }} {{ base_asset }}</div>
+            </div>
+            {% endif %}
+            {% if simulation.total_cycles %}
+            <div class="info-item">
+                <div class="label">Total Cycles</div>
+                <div class="value">{{ simulation.total_cycles }}</div>
+            </div>
+            {% endif %}
+            
+        </div>
+        
+        <div class="chart-container">
+            <div id="chart"></div>
+        </div>
+        
+        <div class="nav-links">
+            <a href="{{ url_for('simulator_list') }}">📊 All Simulations</a>
+            <a href="{{ url_for('simulator_start') }}">🚀 New Simulation</a>
+            <a href="{{ url_for('index') }}">🏠 Dashboard</a>
+        </div>
+    </div>
+
+    <!-- Raw chart JSON (safer injection) -->
+    <script id="chartDataJson" type="application/json">{{ chart_json|safe }}</script>
+
+    <!-- Portfolio Popup -->
+    <div class="popup-overlay" id="popupOverlay"></div>
+    <div class="portfolio-popup" id="portfolioPopup">
+        <div class="popup-header">
+            <h3 id="popupTitle">Portfolio Breakdown</h3>
+        </div>
+        <div class="popup-content">
+            <div id="portfolioBreakdown"></div>
+            <button class="close-btn" onclick="closePortfolioPopup()">Close</button>
+        </div>
+    </div>
+
+    <script>
+    // Expose base asset from server to JS
+    const BASE_ASSET = "{{ base_asset }}";
+
+    // Parse chart data from JSON script tag
+    const chartData = JSON.parse(document.getElementById('chartDataJson').textContent);
+        
+        // Debug: Log chart data
+        console.log('🎮 Simulation Chart Data:', chartData);
+        console.log('📊 Chart has data:', chartData && chartData.data && chartData.data.length > 0);
+        
+        // Plot the chart with click event handler
+        Plotly.newPlot('chart', chartData.data, chartData.layout, {responsive: true}).then(function() {
+            console.log('✅ Simulation chart rendered successfully');
+            
+            document.getElementById('chart').on('plotly_click', function(data) {
+                console.log('🖱️ Simulation chart clicked:', data);
+                var point = data.points[0];
+                if (point && point.customdata) {
+                    console.log('📋 [DEBUG] showPortfolioBreakdown: customdata for cycle', point.x, JSON.stringify(point.customdata));
+                    showPortfolioBreakdown(point.x, point.customdata);
+                } else {
+                    console.log('❌ No customdata found in simulation point:', point);
+                }
+            });
+        }).catch(function(error) {
+            console.error('❌ Simulation chart rendering failed:', error);
+        });
+        
+        function showPortfolioBreakdown(cycleNumber, cycleData) {
+            console.log('DEBUG: Received cycleData:', cycleData);
+            console.log('DEBUG: Type:', typeof cycleData);
+            
+            if (!cycleData) {
+                alert('No data available for this cycle');
+                return;
+            }
+            
+            // Extract portfolio data, reserve, and actual portfolio value from the new structure
+            var portfolioData, reserveValue, actualPortfolioValue;
+            
+            // Check if cycleData has the new combined structure
+            if (cycleData && typeof cycleData === 'object' && 'portfolio_breakdown' in cycleData) {
+                // New combined structure
+                portfolioData = cycleData.portfolio_breakdown;
+                reserveValue = cycleData.bnb_reserve || 0;
+                actualPortfolioValue = cycleData.portfolio_value || 0;
+                console.log('DEBUG: Using new structure, reserve:', reserveValue, 'portfolio_value:', actualPortfolioValue);
+            } else {
+                // Legacy structure - assume cycleData is the portfolio breakdown directly
+                portfolioData = cycleData;
+                reserveValue = 0; // Default to 0 for legacy data
+                actualPortfolioValue = 0; // Default to 0 for legacy data
+                console.log('DEBUG: Using legacy structure, no reserve or portfolio value');
+            }
+            
+            if (!portfolioData) {
+                alert('No portfolio data available for this cycle');
+                return;
+            }
+            
+            // Update popup title
+            document.getElementById('popupTitle').innerText = `Portfolio Breakdown - Cycle ${cycleNumber}`;
+            
+            // Create portfolio breakdown HTML
+            var breakdownHtml = '';
+            var totalValue = 0;
+            
+            // Check if portfolio data has the new format (with performance) or old format (just values)
+            var hasPerformanceData = false;
+            var portfolioEntries = [];
+            
+            if (portfolioData && typeof portfolioData === 'object') {
+                // Check if data has the new enhanced format
+                var firstEntry = Object.values(portfolioData)[0];
+                if (firstEntry && typeof firstEntry === 'object' && 'value' in firstEntry) {
+                    hasPerformanceData = true;
+                    // New format: {crypto_name: {value: X, performance: Y}}
+                    portfolioEntries = Object.entries(portfolioData).map(([name, data]) => [name, data.value, data.performance || 0]);
+                } else {
+                    // Old format: {crypto_name: value}
+                    portfolioEntries = Object.entries(portfolioData).map(([name, value]) => [name, value, 0]);
+                }
+            }
+            
+            // Sort cryptos by value (descending)
+            portfolioEntries.sort((a, b) => b[1] - a[1]);
+            
+            for (var [cryptoName, value, performance] of portfolioEntries) {
+                totalValue += value;
+                var percentage = (value / portfolioEntries.reduce((sum, entry) => sum + entry[1], 0) * 100).toFixed(1);
+                // Parse crypto name and symbol
+                var displayName = cryptoName;
+                var symbolPart = '';
+                // Check if crypto name has format "Name (SYMBOL)"
+                var symbolMatch = cryptoName.match(/^(.+?)\s*\(([^)]+)\)$/);
+                if (symbolMatch) {
+                    displayName = symbolMatch[1].trim();
+                    symbolPart = ` <span class="crypto-symbol">${symbolMatch[2]}</span>`;
+                }
+                // Format performance percentage
+                var performanceText = '';
+                if (hasPerformanceData && performance !== 0) {
+                    var performancePercent = (performance * 100).toFixed(2);
+                    var performanceColor = performance >= 0 ? '#28a745' : '#dc3545';
+                    var performanceSign = performance >= 0 ? '+' : '';
+                    performanceText = `<span style="color: ${performanceColor}; font-weight: 600; margin-left: 8px;">${performanceSign}${performancePercent}%</span>`;
+                }
+                if (cryptoName === 'NO_ASSETS') {
+                    breakdownHtml += `<div class='crypto-item' style='color:#888;'>No assets in portfolio at this cycle.</div>`;
+                } else {
+                    breakdownHtml += `
+                        <div class="crypto-item">
+                            <div class="crypto-name">${displayName}${symbolPart}</div>
+                            <div class="crypto-value">${value.toFixed(6)} ${BASE_ASSET} (${percentage}%)${performanceText}</div>
+                        </div>
+                    `;
+                }
+            }
+            
+            // Add Reserve
+            console.log('DEBUG: Adding reserve to HTML, value:', reserveValue);
+            breakdownHtml += `
+                <div class="crypto-item" style="border-top: 1px solid #ddd; margin-top: 10px; padding-top: 10px;">
+                    <div class="crypto-name">${BASE_ASSET} Reserve <span class="crypto-symbol">${BASE_ASSET}</span></div>
+                    <div class="crypto-value">${reserveValue.toFixed(6)} ${BASE_ASSET}</div>
+                </div>
+            `;
+            
+            // Add total at the bottom - use actual portfolio value from cycle data
+            var displayPortfolioValue = actualPortfolioValue > 0 ? actualPortfolioValue : totalValue;
+            var totalWithReserve = displayPortfolioValue + reserveValue;
+            console.log('DEBUG: Calculated portfolio:', totalValue, 'Actual portfolio:', actualPortfolioValue, 'Reserve:', reserveValue, 'Combined:', totalWithReserve);
+            breakdownHtml += `
+                <div class="crypto-item" style="border-top: 2px solid #667eea; margin-top: 10px; padding-top: 15px;">
+                    <div class="crypto-name" style="font-weight: 700;">Portfolio Value (Investments)</div>
+                    <div class="crypto-value" style="font-size: 1.2em; color: #28a745;">${displayPortfolioValue.toFixed(6)} ${BASE_ASSET}</div>
+                </div>
+                <div class="crypto-item">
+                    <div class="crypto-name" style="font-weight: 700;">Total Value (Portfolio + Reserve)</div>
+                    <div class="crypto-value" style="font-size: 1.2em; color: #667eea;">${totalWithReserve.toFixed(6)} ${BASE_ASSET}</div>
+                </div>
+            `;
+            
+            console.log('DEBUG: Final HTML:', breakdownHtml);
+            document.getElementById('portfolioBreakdown').innerHTML = breakdownHtml;
+            
+            // Show popup
+            document.getElementById('popupOverlay').style.display = 'block';
+            document.getElementById('portfolioPopup').style.display = 'block';
+        }
+        
+        function closePortfolioPopup() {
+            document.getElementById('popupOverlay').style.display = 'none';
+            document.getElementById('portfolioPopup').style.display = 'none';
+        }
+        
+        // Close popup when clicking overlay
+        document.getElementById('popupOverlay').addEventListener('click', closePortfolioPopup);
+        
+        // Close popup with Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closePortfolioPopup();
+            }
+        });
+
+        // -------- Live Progress & Runtime Indicator -------- //
+    const metaEl = document.getElementById('simulationMeta');
+    const simulationId = parseInt(metaEl.dataset.simulationId);
+    const initialStatus = metaEl.dataset.status;
+    const elapsedSpan = document.getElementById('elapsedTime');
+    const indicator = document.getElementById('liveIndicator');
+    const liveText = document.getElementById('liveText');
+    let baseCreatedAt = metaEl.dataset.createdAt ? new Date(metaEl.dataset.createdAt) : new Date();
+    let completedAt = metaEl.dataset.completedAt ? new Date(metaEl.dataset.completedAt) : null;
+
+        function formatDuration(sec) {
+            if (sec < 0) sec = 0;
+            const h = Math.floor(sec/3600);
+            const m = Math.floor((sec%3600)/60);
+            const s = Math.floor(sec%60);
+            const parts = [];
+            if (h) parts.push(h+'h');
+            if (m) parts.push(m+'m');
+            parts.push(s+'s');
+            return parts.join(' ');
+        }
+
+        function updateRuntimeDisplay(elapsedSeconds) {
+            elapsedSpan.textContent = formatDuration(elapsedSeconds);
+        }
+
+    let freezeElapsed = false;
+
+    function pollProgress() {
+            fetch(`/api/simulation/${simulationId}/progress?_=${Date.now()}`)
+              .then(r=>r.json())
+              .then(data => {
+                  if (data.error) return;
+                  // Update runtime
+                  if (data.created_at) baseCreatedAt = new Date(data.created_at);
+                  const now = new Date();
+                  let elapsed = data.elapsed_seconds || ((now - baseCreatedAt)/1000);
+                  updateRuntimeDisplay(elapsed);
+                  // Update current cycle field
+                  if (typeof data.last_cycle_number !== 'undefined') {
+                      document.getElementById('currentCycleValue').textContent = data.last_cycle_number;
+                  }
+                  if (data.status === 'running') {
+                      indicator.style.display = 'inline-flex';
+                      if (data.stuck) {
+                          indicator.classList.add('stuck');
+                          liveText.textContent = 'Possibly Stuck ('+Math.floor(data.seconds_since_last_cycle)+'s idle)';
+                      } else {
+                          indicator.classList.remove('stuck');
+                          liveText.textContent = 'Running (Cycle '+data.last_cycle_number+')';
+                      }
+                      freezeElapsed = false;
+                  } else if (data.status === 'completed') {
+                      indicator.style.display = 'inline-flex';
+                      indicator.classList.remove('stuck');
+                      liveText.textContent = 'Completed';
+                      freezeElapsed = true; // stop local counter
+                  } else if (data.status === 'failed') {
+                      indicator.style.display = 'inline-flex';
+                      indicator.classList.add('stuck');
+                      liveText.textContent = 'Failed';
+                      freezeElapsed = true;
+                  } else {
+                      indicator.style.display = 'none';
+                      freezeElapsed = true;
+                  }
+              })
+              .catch(()=>{});
+        }
+
+        // Initial state from data
+        if (['running','pending'].includes(initialStatus)) {
+            indicator.style.display = 'inline-flex';
+            liveText.textContent = initialStatus.charAt(0).toUpperCase()+initialStatus.slice(1)+'...';
+        } else if (initialStatus === 'completed') {
+            indicator.style.display = 'inline-flex';
+            liveText.textContent = 'Completed';
+            if (completedAt && baseCreatedAt) {
+                const elapsed = (completedAt - baseCreatedAt)/1000;
+                updateRuntimeDisplay(elapsed);
+            }
+        }
+
+        // Start polling every 5s when running/pending
+        let pollInterval = null;
+        function startPolling(){
+            if (pollInterval) return;
+            pollProgress();
+            pollInterval = setInterval(pollProgress, 5000);
+        }
+        if (['running','pending'].includes(initialStatus)) startPolling();
+
+        // Also update elapsed timer smoothly every second locally
+        setInterval(()=>{
+            if (freezeElapsed || !baseCreatedAt) return;
+            const now = new Date();
+            const elapsed = (now - baseCreatedAt)/1000;
+            updateRuntimeDisplay(elapsed);
+        },1000);
+    </script>
+</body>
+</html>

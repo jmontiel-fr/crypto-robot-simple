@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mon Compte Binance - Crypto Trading Robot</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .account-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .production-badge {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 5px 15px;
+            border-radius: 15px;
+            font-size: 0.9em;
+        }
+        .balance-card {
+            border-left: 4px solid #28a745;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            margin-bottom: 10px;
+        }
+        .balance-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transition: all 0.3s ease;
+        }
+        .total-value-card {
+            border-left: 4px solid #007bff;
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+        }
+        .asset-logo {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        .btn-back {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            border: none;
+            color: white;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container mt-4">
+        <!-- Header -->
+        <div class="account-header text-center">
+            <h1><i class="fab fa-bitcoin"></i> Mon Compte Binance</h1>
+            <p class="mb-0">Consultation en temps réel de votre portefeuille</p>
+            <span class="production-badge mt-2 d-inline-block">
+                <i class="fas fa-chart-line"></i> Mode Production
+            </span>
+        </div>
+
+        <!-- Navigation -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <a href="/" class="btn btn-back">
+                    <i class="fas fa-arrow-left"></i> Retour au Dashboard
+                </a>
+            </div>
+        </div>
+
+        <!-- Account Summary -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card total-value-card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">Valeur Totale</h5>
+                        <h3 class="text-primary">{{ "%.6f"|format(account_info.total_value_bnb) }} BNB</h3>
+                        <small class="text-muted">≈ ${{ "%.2f"|format(account_info.total_value_bnb * 765) }}</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">Type de Compte</h5>
+                        <h4 class="text-info">{{ account_info.account_type }}</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">Trading</h5>
+                        {% if account_info.can_trade %}
+                            <h4 class="text-success"><i class="fas fa-check-circle"></i> Activé</h4>
+                        {% else %}
+                            <h4 class="text-danger"><i class="fas fa-times-circle"></i> Désactivé</h4>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">Actifs</h5>
+                        <h4 class="text-warning">{{ account_info.balances|length }}</h4>
+                        <small class="text-muted">cryptomonnaies</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if show_live_prices and live_prices %}
+        <!-- Total Portfolio Value -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card total-value-card">
+                    <div class="card-body text-center">
+                        <h5><i class="fas fa-chart-line"></i> Valeur Totale du Portfolio</h5>
+                        <h2 class="text-primary">${{ "%.2f"|format(live_prices.values() | map(attribute='value_usdt') | sum) }} USDT</h2>
+                        <small class="text-muted">Prix en temps réel via Binance API</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Balances List -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-wallet"></i> Mes Cryptomonnaies</h5>
+                        <div>
+                            {% if show_live_prices %}
+                                <a href="{{ request.path }}" class="btn btn-secondary btn-sm me-2">
+                                    <i class="fas fa-eye-slash"></i> Masquer Prix
+                                </a>
+                                <button class="btn btn-warning btn-sm" onclick="location.reload()">
+                                    <i class="fas fa-sync-alt"></i> Actualiser
+                                </button>
+                            {% else %}
+                                <a href="{{ request.path }}?live_prices=true" class="btn btn-warning btn-sm">
+                                    <i class="fas fa-dollar-sign"></i> Afficher Prix
+                                </a>
+                            {% endif %}
+                            <small class="text-muted ms-2">Mise à jour: {{ account_info.update_time.strftime('%d/%m/%Y %H:%M:%S') }}</small>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        {% if account_info.balances %}
+                            <div class="row">
+                                {% for balance in account_info.balances %}
+                                <div class="col-md-6 col-lg-4 mb-3">
+                                    <div class="card balance-card h-100">
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <img src="https://assets.coingecko.com/coins/images/825/thumb/bnb-icon2_2x.png" 
+                                                     alt="{{ balance.asset }}" 
+                                                     class="asset-logo"
+                                                     onerror="this.style.display='none'">
+                                                <h6 class="mb-0 fw-bold">{{ balance.asset }}</h6>
+                                            </div>
+                                            
+                                            <div class="row text-center">
+                                                <div class="col-6">
+                                                    <small class="text-muted">Disponible</small>
+                                                    <div class="fw-bold">{{ "%.6f"|format(balance.free) }}</div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <small class="text-muted">Bloqué</small>
+                                                    <div class="fw-bold">{{ "%.6f"|format(balance.locked) }}</div>
+                                                </div>
+                                            </div>
+                                            
+                                            <hr class="my-2">
+                                            
+                                            <div class="row text-center">
+                                                <div class="col-6">
+                                                    <small class="text-muted">Total</small>
+                                                    <div class="fw-bold text-primary">{{ "%.6f"|format(balance.total) }}</div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <small class="text-muted">Valeur BNB</small>
+                                                    <div class="fw-bold text-success">{{ "%.6f"|format(balance.value_bnb) }}</div>
+                                                </div>
+                                            </div>
+                                            
+                                            {% if show_live_prices and balance.asset in live_prices %}
+                                                <hr class="my-2">
+                                                <div class="row text-center">
+                                                    <div class="col-6">
+                                                        <small class="text-muted">Prix USDT</small>
+                                                        <div class="fw-bold text-warning">${{ "%.4f"|format(live_prices[balance.asset].price) }}</div>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <small class="text-muted">Valeur USDT</small>
+                                                        <div class="fw-bold text-info">${{ "%.2f"|format(live_prices[balance.asset].value_usdt) }}</div>
+                                                    </div>
+                                                </div>
+                                            {% endif %}
+                                            
+                                            {% if balance.asset != 'BNB' %}
+                                                <div class="text-center mt-2">
+                                                    <small class="text-muted">Prix: {{ "%.6f"|format(balance.price_bnb) }} BNB</small>
+                                                </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <div class="text-center py-5">
+                                <i class="fas fa-wallet fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">Aucun actif trouvé</h5>
+                                <p class="text-muted">Votre compte ne contient actuellement aucune cryptomonnaie.</p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Permissions Info -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-shield-alt"></i> Permissions du Compte</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4 text-center">
+                                {% if account_info.can_trade %}
+                                    <i class="fas fa-exchange-alt fa-2x text-success mb-2"></i>
+                                    <h6 class="text-success">Trading Autorisé</h6>
+                                {% else %}
+                                    <i class="fas fa-ban fa-2x text-danger mb-2"></i>
+                                    <h6 class="text-danger">Trading Interdit</h6>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-4 text-center">
+                                {% if account_info.can_deposit %}
+                                    <i class="fas fa-plus-circle fa-2x text-success mb-2"></i>
+                                    <h6 class="text-success">Dépôts Autorisés</h6>
+                                {% else %}
+                                    <i class="fas fa-ban fa-2x text-danger mb-2"></i>
+                                    <h6 class="text-danger">Dépôts Interdits</h6>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-4 text-center">
+                                {% if account_info.can_withdraw %}
+                                    <i class="fas fa-minus-circle fa-2x text-warning mb-2"></i>
+                                    <h6 class="text-warning">Retraits Autorisés</h6>
+                                {% else %}
+                                    <i class="fas fa-shield-alt fa-2x text-success mb-2"></i>
+                                    <h6 class="text-success">Retraits Bloqués (Sécurisé)</h6>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Refresh Button -->
+        <div class="row mt-4 mb-4">
+            <div class="col-12 text-center">
+                <button class="btn btn-primary" onclick="window.location.reload()">
+                    <i class="fas fa-sync-alt"></i> Actualiser les Données
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

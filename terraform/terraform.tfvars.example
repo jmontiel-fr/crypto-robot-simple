@@ -1,0 +1,15 @@
+# Example values for terraform.tfvars
+# Copy this file to terraform.tfvars and update with your actual values
+
+vpc_id         = "vpc-0ee30813b6d1cd7fd"                  # Replace with your actual VPC ID
+s3_bucket_name = "crypto-robot-backups-059247592146"      # Replace with your desired S3 bucket name (must be globally unique)
+ssh_key_name   = "web-crypto-robot-key"                   # Replace with your SSH key pair name
+region         = "eu-west-1"
+
+# Optional: Override default allowed CIDRs
+allowed_cidrs = [
+  "163.116.163.0/24",   # Company network
+  "163.116.176.0/24",   # Company network
+  "163.116.242.0/24",   # Company network
+  "91.160.77.169/32"    # Specific IP
+]

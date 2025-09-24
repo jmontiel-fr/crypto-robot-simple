@@ -1,0 +1,90 @@
+# Reusable workflow for SSH key management
+# 
+# Purpose: Centralized SSH key retrieval for workflows that need EC2 access
+# 
+# Key Sources (priority order):
+# 1. Workflow artifacts from build-robot-infra runs
+# 2. GitHub secrets (EC2_SSH_PRIVATE_KEY)
+# 3. None (reports failure)
+#
+# Usage:
+#   jobs:
+#     get-ssh-key:
+#       uses: ./.github/workflows/get-ssh-key.yml
+#       secrets: inherit
+#     
+#     your-job:
+#       needs: get-ssh-key
+#       if: needs.get-ssh-key.outputs.ssh_key_available == 'true'
+#       steps:
+#         - name: Use SSH
+#           run: ssh -i ~/.ssh/crypto-robot-key.pem ec2-user@$IP "command"
+
+name: get-ssh-key
+
+on:
+  workflow_call:
+    outputs:
+      ssh_key_available:
+        description: "Whether SSH key is available"
+        value: ${{ jobs.get-key.outputs.ssh_key_available }}
+      key_source:
+        description: "Source of the SSH key (artifact or secret)"
+        value: ${{ jobs.get-key.outputs.key_source }}
+
+jobs:
+  get-key:
+    runs-on: ubuntu-latest
+    outputs:
+      ssh_key_available: ${{ steps.setup_key.outputs.ssh_key_available }}
+      key_source: ${{ steps.setup_key.outputs.key_source }}
+    
+    steps:
+    - name: Try to download latest SSH key artifact
+      id: download_artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ssh-private-key-latest
+        path: ./ssh-keys/
+      continue-on-error: true
+      
+    - name: Setup SSH Key
+      id: setup_key
+      run: |
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        
+        # Check if artifact key exists and is valid
+        if [ -f "./ssh-keys/ssh-private-key.pem" ] && [ -s "./ssh-keys/ssh-private-key.pem" ]; then
+          # Check if it's not a placeholder
+          if ! grep -q "# Private key not available" "./ssh-keys/ssh-private-key.pem"; then
+            cp ./ssh-keys/ssh-private-key.pem ~/.ssh/crypto-robot-key.pem
+            chmod 600 ~/.ssh/crypto-robot-key.pem
+            echo "ssh_key_available=true" >> $GITHUB_OUTPUT
+            echo "key_source=artifact" >> $GITHUB_OUTPUT
+            echo "✅ Using SSH key from artifact"
+            exit 0
+          fi
+        fi
+        
+        # Fallback to GitHub secret
+        if [ -n "${{ secrets.EC2_SSH_PRIVATE_KEY }}" ]; then
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/crypto-robot-key.pem
+          chmod 600 ~/.ssh/crypto-robot-key.pem
+          echo "ssh_key_available=true" >> $GITHUB_OUTPUT
+          echo "key_source=secret" >> $GITHUB_OUTPUT
+          echo "✅ Using SSH key from GitHub secret"
+        else
+          echo "❌ No SSH key available"
+          echo "ssh_key_available=false" >> $GITHUB_OUTPUT
+          echo "key_source=none" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+    - name: Upload SSH key for other jobs
+      if: steps.setup_key.outputs.ssh_key_available == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ssh-key-ready-${{ github.run_id }}
+        path: ~/.ssh/crypto-robot-key.pem
+        retention-days: 1

@@ -1,0 +1,642 @@
+name: control-robot-aws
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to (hostname-based)'
+        required: true
+        type: choice
+        options:
+          - crypto-robot.local
+          - jack_robot.crypto-vision.com
+          - its_robot.crypto-vision.com
+      init_env:
+        description: 'Initialize environment (.env from secrets)'
+        required: false
+        default: false
+        type: boolean
+      execute_command:
+        description: 'Commands to execute (comma-separated, in order)'
+        required: false
+        default: 'application-status'
+        type: choice
+        options:
+          - application-status
+          - update-code
+          - setup-environment
+          - start-robot
+          - start-webapp
+          - create_fresh_portfolio
+          - stop-robot
+          - stop-webapp
+          - update-code,setup-environment,start-robot,start-webapp
+          - stop-robot,stop-webapp,update-code,setup-environment,start-robot,start-webapp
+          - application-status,update-code,setup-environment,start-robot,start-webapp
+      start-runner:
+        description: "Start EC2 instance if not running"
+        required: false
+        default: true
+        type: boolean
+      stop-runner-at-end:
+        description: "Stop the runner at the end of the workflow"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: eu-west-1
+  INSTANCE_NAME: web-crypto-robot-instance
+  RUNNER_INSTANCE_NAME: runner-jmontiel-fr-crypto-robot
+  APP_BASE_DIR: /opt/crypto-robot
+
+jobs:
+  get-ssh-key:
+    uses: ./.github/workflows/get-ssh-key.yml
+    secrets: inherit
+
+  start-instance:
+    needs: get-ssh-key
+    name: Start EC2 instance if not running
+    runs-on: ubuntu-latest
+    if: github.event.inputs.start-runner == 'true'
+    outputs:
+      instance-id: ${{ steps.start.outputs.instance-id }}
+      instance-ip: ${{ steps.start.outputs.instance-ip }}
+    steps:
+      - name: Workflow started
+        run: |
+          echo "🚀 Control Robot AWS workflow started"
+          echo "Status: Moving from QUEUED to IN PROGRESS"
+          echo "Timestamp: $(date -u)"
+          echo "Repository: ${{ github.repository }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Waiting 10 seconds to show queue status..."
+          sleep 10
+          
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Start EC2 instance if not running
+        id: start
+        run: |
+          # Get instance ID and IP
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region "${{ env.AWS_REGION }}" \
+            --filters "Name=tag:Name,Values=${{ env.INSTANCE_NAME }}" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text 2>/dev/null)
+          
+          if [ "$INSTANCE_ID" = "None" ]; then
+            echo "❌ Instance not found"
+            exit 1
+          fi
+          if [ "$INSTANCE_ID" = "null" ]; then
+            echo "❌ Instance not found"
+            exit 1
+          fi
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "❌ Instance not found"
+            exit 1
+          fi
+          
+          INSTANCE_STATE=$(aws ec2 describe-instances \
+            --region "${{ env.AWS_REGION }}" \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text)
+          
+          echo "Instance $INSTANCE_ID is currently: $INSTANCE_STATE"
+          
+          if [ "$INSTANCE_STATE" = "stopped" ]; then
+            echo "Starting instance..."
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+            aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance started"
+          elif [ "$INSTANCE_STATE" = "running" ]; then
+            echo "✅ Instance already running"
+          else
+            echo "⚠️ Instance is in state: $INSTANCE_STATE"
+          fi
+          
+          # Get Elastic IP (preferred) or Public IP
+          EIP_ADDRESS=$(aws ec2 describe-addresses \
+            --region "${{ env.AWS_REGION }}" \
+            --filters "Name=instance-id,Values=$INSTANCE_ID" \
+            --query 'Addresses[0].PublicIp' \
+            --output text 2>/dev/null)
+          
+          if [ "$EIP_ADDRESS" != "None" ] && [ "$EIP_ADDRESS" != "null" ] && [ -n "$EIP_ADDRESS" ]; then
+            INSTANCE_IP="$EIP_ADDRESS"
+          else
+            INSTANCE_IP=$(aws ec2 describe-instances \
+              --region "${{ env.AWS_REGION }}" \
+              --instance-ids "$INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].PublicIpAddress' \
+              --output text 2>/dev/null)
+          fi
+          
+          echo "instance-id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "instance-ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+          echo "✅ Found instance: $INSTANCE_ID at $INSTANCE_IP"
+
+  control-application:
+    needs: [get-ssh-key, start-instance]
+    runs-on: self-hosted
+    if: always() && (github.event.inputs.start-runner == 'false' || needs.start-instance.result == 'success')
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Use instance details from start-instance job
+      id: instance_details
+      run: |
+        INSTANCE_ID="${{ needs.start-instance.outputs.instance-id }}"
+        INSTANCE_IP="${{ needs.start-instance.outputs.instance-ip }}"
+        
+        if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "null" ]; then
+          echo "instance_found=true" >> $GITHUB_OUTPUT
+          echo "instance_id=${INSTANCE_ID}" >> $GITHUB_OUTPUT
+          echo "instance_ip=${INSTANCE_IP}" >> $GITHUB_OUTPUT
+          echo "✅ Using instance: $INSTANCE_ID at $INSTANCE_IP"
+        else
+          echo "❌ No instance details available from start-instance job"
+          echo "instance_found=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+    - name: Setup SSH known hosts
+      if: steps.instance_details.outputs.instance_found == 'true'
+      run: |
+        # Add EC2 instance to known hosts
+        ssh-keyscan -H ${{ steps.instance_details.outputs.instance_ip }} >> ~/.ssh/known_hosts
+        
+        # Verify SSH key is available (should be set up by get-ssh-key workflow)
+        if [ -f ~/.ssh/crypto-robot-key.pem ]; then
+          echo "✅ SSH key is available from get-ssh-key workflow"
+          echo "Key source: ${{ needs.get-ssh-key.outputs.key_source }}"
+        else
+          echo "❌ SSH key not found - get-ssh-key workflow may have failed"
+          exit 1
+        fi
+        
+    - name: Initialize environment
+      if: steps.instance_details.outputs.instance_found == 'true' && github.event.inputs.init_env == 'true'
+      id: init_env
+      run: |
+        echo "🔧 Initializing environment on EC2 instance..."
+        echo "Setting up application directory and cloning repository..."
+        
+        # Create the crypto-robot directory on EC2 if it doesn't exist
+        ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+          ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+          "sudo mkdir -p /opt/crypto-robot && sudo chown ec2-user:ec2-user /opt/crypto-robot"
+        
+        # Clone or update repository
+        ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+          ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+          "cd /opt && \
+          if [ -d crypto-robot/.git ]; then \
+            echo '🔄 Updating existing repository...' && \
+            cd crypto-robot && git pull origin main; \
+          else \
+            echo '📥 Cloning repository...' && \
+            sudo rm -rf crypto-robot && \
+            git clone https://github.com/${{ github.repository }}.git crypto-robot && \
+            sudo chown -R ec2-user:ec2-user crypto-robot; \
+          fi"
+        
+        # Create .env file from template and inject API keys
+        ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+          ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+          "cd /opt/crypto-robot && \
+          if [ -f robot/.env.template ]; then \
+            cp robot/.env.template .env && \
+            chmod 600 .env && \
+            echo '✅ .env file created from template'; \
+          else \
+            echo '❌ .env.template not found in repository'; \
+            exit 1; \
+          fi"
+        
+        # Inject API keys from GitHub secrets
+        # Generate secret name from environment hostname
+        SECRET_NAME=$(echo "${{ github.event.inputs.environment }}" | tr '[:lower:]' '[:upper:]' | sed 's/[.-]/_/g')_KEYS
+        echo "🔑 Using secret: $SECRET_NAME"
+        
+        # Get the secret value using the dynamic secret name
+        SECRET_VALUE=""
+        case "${{ github.event.inputs.environment }}" in
+          "crypto-robot.local")
+            SECRET_VALUE="${{ secrets.CRYPTO_ROBOT_LOCAL_KEYS }}"
+            ;;
+          "jack_robot.crypto-vision.com")
+            SECRET_VALUE="${{ secrets.JACK_ROBOT_CRYPTO_VISION_COM_KEYS }}"
+            ;;
+          "its_robot.crypto-vision.com")
+            SECRET_VALUE="${{ secrets.ITS_ROBOT_CRYPTO_VISION_COM_KEYS }}"
+            ;;
+          *)
+            echo "❌ No API keys configured for environment: ${{ github.event.inputs.environment }}"
+            exit 1
+            ;;
+        esac
+        
+        if [ -n "$SECRET_VALUE" ]; then
+          # Inject API keys using the injection script
+          ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+            ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+            "cd /opt/crypto-robot && \
+            export HOSTNAME=\"${{ github.event.inputs.environment }}\" && \
+            export ${SECRET_NAME}='${SECRET_VALUE}' && \
+            chmod +x scripts/inject-api-keys.sh && \
+            ./scripts/inject-api-keys.sh && \
+            echo '✅ API keys injected successfully'"
+        else
+          echo "❌ No API keys found for environment: ${{ github.event.inputs.environment }}"
+          exit 1
+        fi
+        
+        # Verify .env file was created and configured
+        ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+          ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+          "ls -la /opt/crypto-robot/.env && echo '✅ Environment file configured at /opt/crypto-robot/.env'"
+        
+        echo "env_initialized=true" >> $GITHUB_OUTPUT
+        
+    - name: Parse and execute commands
+      if: steps.instance_details.outputs.instance_found == 'true'
+      id: execute_commands
+      run: |
+        echo "🚀 Executing commands on EC2 instance..."
+        
+        # Parse comma-separated commands
+        IFS=',' read -ra COMMANDS <<< "${{ github.event.inputs.execute_command }}"
+        
+        # Initialize results
+        RESULTS=""
+        SUCCESS_COUNT=0
+        TOTAL_COUNT=0
+        
+        # Execute each command
+        for cmd in "${COMMANDS[@]}"; do
+          # Trim whitespace
+          cmd=$(echo "$cmd" | xargs)
+          
+          if [ -z "$cmd" ]; then
+            continue
+          fi
+          
+          TOTAL_COUNT=$((TOTAL_COUNT + 1))
+          echo ""
+          echo "📋 Executing command: $cmd"
+          echo "----------------------------------------"
+          
+          case "$cmd" in
+            "update-code")
+              echo "🔄 Updating application code from repository..."
+              if ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+                ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+                "cd /opt/crypto-robot && \
+                if [ -d .git ]; then \
+                  git pull origin main && echo '✅ Code updated from repository'; \
+                else \
+                  echo '⚠️  Not a git repository - cloning fresh copy' && \
+                  cd /opt && \
+                  sudo rm -rf crypto-robot && \
+                  git clone https://github.com/${{ github.repository }}.git crypto-robot && \
+                  sudo chown -R ec2-user:ec2-user crypto-robot && \
+                  echo '✅ Repository cloned successfully'; \
+                fi"; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "❌ Failed to update code"
+              fi
+              ;;
+              
+            "setup-environment")
+              echo "🐍 Setting up Python environment..."
+              if ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+                ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+                "cd /opt/crypto-robot && \
+                chmod +x scripts/setup-python-env.sh && \
+                ./scripts/setup-python-env.sh && \
+                echo '✅ Python environment setup completed'"; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "❌ Failed to setup Python environment"
+              fi
+              ;;
+              
+            "start-robot")
+              echo "🤖 Starting trading robot..."
+              if ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+                ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+                "cd /opt/crypto-robot && \
+                export HOSTNAME=\"${{ github.event.inputs.environment }}\" && \
+                chmod +x scripts/start-robot-direct.sh && \
+                ./scripts/start-robot-direct.sh && \
+                echo '✅ Robot started successfully'"; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "❌ Failed to start robot for ${{ github.event.inputs.environment }}"
+              fi
+              ;;
+              
+            "start-webapp")
+              echo "🌐 Starting web application..."
+              if ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+                ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+                "cd /opt/crypto-robot && \
+                export HOSTNAME=\"${{ github.event.inputs.environment }}\" && \
+                chmod +x scripts/start-webapp-direct.sh && \
+                ./scripts/start-webapp-direct.sh && \
+                echo '✅ WebApp started successfully'"; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "❌ Failed to start webapp for ${{ github.event.inputs.environment }}"
+              fi
+              ;;
+              
+            "create_fresh_portfolio")
+              echo "💰 Creating fresh portfolio..."
+              if ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+                ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+                "cd /opt/crypto-robot && \
+                source venv/bin/activate && \
+                python -c \"
+                import sys
+                sys.path.append('/opt/crypto-robot')
+                from robot.portfolio_manager import PortfolioManager
+                pm = PortfolioManager()
+                pm.create_fresh_portfolio()
+                print('✅ Fresh portfolio created successfully')
+                \""; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "❌ Failed to create fresh portfolio for ${{ github.event.inputs.environment }}"
+              fi
+              ;;
+              
+            "stop-robot")
+              echo "🛑 Stopping trading robot..."
+              if ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+                ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+                "cd /opt/crypto-robot && \
+                chmod +x scripts/stop-robot-direct.sh && \
+                ./scripts/stop-robot-direct.sh && \
+                echo '✅ Robot stopped successfully'"; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "❌ Failed to stop robot for ${{ github.event.inputs.environment }} (may not be running)"
+              fi
+              ;;
+              
+            "stop-webapp")
+              echo "🛑 Stopping web application..."
+              if ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+                ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+                "cd /opt/crypto-robot && \
+                chmod +x scripts/stop-webapp-direct.sh && \
+                ./scripts/stop-webapp-direct.sh && \
+                echo '✅ WebApp stopped successfully'"; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "❌ Failed to stop webapp for ${{ github.event.inputs.environment }} (may not be running)"
+              fi
+              ;;
+              
+            "application-status")
+              echo "📊 Checking application status..."
+              if ssh -i ~/.ssh/crypto-robot-key.pem -o StrictHostKeyChecking=no \
+                ec2-user@${{ steps.instance_details.outputs.instance_ip }} \
+                "cd /opt/crypto-robot && \
+                echo '=== Python Environment ===' && \
+                if [ -d venv ]; then echo 'Virtual environment: ✅ Present'; else echo 'Virtual environment: ❌ Missing'; fi && \
+                echo '' && \
+                echo '=== Running Processes ===' && \
+                ps aux | grep -E 'python.*(main|app)\.py' | grep -v grep || echo 'No Python processes running' && \
+                echo '' && \
+                echo '=== PID Files ===' && \
+                ls -la *.pid 2>/dev/null || echo 'No PID files found' && \
+                echo '' && \
+                echo '=== Environment File Status ===' && \
+                ls -la .env 2>/dev/null && echo 'Environment file exists' || echo 'Environment file not found' && \
+                echo '' && \
+                echo '=== Recent Logs ===' && \
+                ls -la logs/*.log 2>/dev/null | tail -5 || echo 'No log files found' && \
+                echo '✅ Status check completed'"; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "❌ Failed to get application status for ${{ github.event.inputs.environment }}"
+              fi
+              ;;
+              
+            *)
+              echo "❌ Unknown command: $cmd"
+              echo "Available commands: update-code, setup-environment, start-robot, start-webapp, create_fresh_portfolio, stop-robot, stop-webapp, application-status"
+              ;;
+          esac
+          
+          echo "----------------------------------------"
+        done
+        
+        # Set outputs
+        echo "total_commands=${TOTAL_COUNT}" >> $GITHUB_OUTPUT
+        echo "successful_commands=${SUCCESS_COUNT}" >> $GITHUB_OUTPUT
+        echo "failed_commands=$((TOTAL_COUNT - SUCCESS_COUNT))" >> $GITHUB_OUTPUT
+        
+        if [ $SUCCESS_COUNT -eq $TOTAL_COUNT ]; then
+          echo "execution_status=success" >> $GITHUB_OUTPUT
+          echo "✅ All commands executed successfully ($SUCCESS_COUNT/$TOTAL_COUNT)"
+        else
+          echo "execution_status=partial" >> $GITHUB_OUTPUT
+          echo "⚠️ Some commands failed ($SUCCESS_COUNT/$TOTAL_COUNT successful)"
+        fi
+        
+    - name: Cleanup
+      if: always()
+      run: |
+        # Remove SSH key and temporary files
+        rm -f ~/.ssh/crypto-robot-key.pem
+        rm -f .env-host
+        
+    - name: Generate Summary
+      if: always()
+      run: |
+        echo "## AWS Application Control 🚀" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.instance_details.outputs.instance_found }}" = "true" ]; then
+          echo "**Instance:** ${{ steps.instance_details.outputs.instance_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**IP Address:** ${{ steps.instance_details.outputs.instance_ip }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Instance Status:** Not found or not running" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Use **control-robot-infra** workflow to start the EC2 instance" >> $GITHUB_STEP_SUMMARY
+          echo "2. Ensure the instance is in 'running' state before managing applications" >> $GITHUB_STEP_SUMMARY
+          exit 0
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Environment initialization
+        if [ "${{ github.event.inputs.init_env }}" = "true" ]; then
+          if [ "${{ steps.init_env.outputs.env_initialized }}" = "true" ]; then
+            echo "✅ **Environment:** Initialized successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Environment:** Initialization failed" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "⏭️ **Environment:** Initialization skipped" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Command execution results
+        if [ -n "${{ steps.execute_commands.outputs.total_commands }}" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Command Execution Results:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Commands:** ${{ steps.execute_commands.outputs.total_commands }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Successful:** ${{ steps.execute_commands.outputs.successful_commands }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Failed:** ${{ steps.execute_commands.outputs.failed_commands }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.execute_commands.outputs.execution_status }}" = "success" ]; then
+            echo "- **Overall Status:** ✅ All commands successful" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Overall Status:** ⚠️ Some commands failed" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Available Commands:" >> $GITHUB_STEP_SUMMARY
+        echo "- **update-code** - Update application code from repository" >> $GITHUB_STEP_SUMMARY
+        echo "- **setup-environment** - Setup Python virtual environment" >> $GITHUB_STEP_SUMMARY
+        echo "- **start-robot** - Start trading robot process" >> $GITHUB_STEP_SUMMARY
+        echo "- **start-webapp** - Start web application process" >> $GITHUB_STEP_SUMMARY
+        echo "- **create_fresh_portfolio** - Initialize new portfolio" >> $GITHUB_STEP_SUMMARY
+        echo "- **stop-robot** - Stop trading robot process" >> $GITHUB_STEP_SUMMARY
+        echo "- **stop-webapp** - Stop web application process" >> $GITHUB_STEP_SUMMARY
+        echo "- **application-status** - Check application and process status" >> $GITHUB_STEP_SUMMARY
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Usage Examples:" >> $GITHUB_STEP_SUMMARY
+        echo "- Single command: \`application-status\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Multiple commands: \`update-code,setup-environment,start-robot,start-webapp\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Full deployment: \`stop-robot,stop-webapp,update-code,setup-environment,start-robot,start-webapp\`" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.instance_details.outputs.instance_found }}" = "true" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### SSH Access:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'ssh -i web-crypto-robot-key.pem ec2-user@${{ steps.instance_details.outputs.instance_ip }}' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        fi
+    
+    outputs:
+      instance_id: ${{ steps.instance_details.outputs.instance_id }}
+      instance_ip: ${{ steps.instance_details.outputs.instance_ip }}
+      env_initialized: ${{ steps.init_env.outputs.env_initialized }}
+      execution_status: ${{ steps.execute_commands.outputs.execution_status }}
+      total_commands: ${{ steps.execute_commands.outputs.total_commands }}
+      successful_commands: ${{ steps.execute_commands.outputs.successful_commands }}
+      failed_commands: ${{ steps.execute_commands.outputs.failed_commands }}
+
+  stop-runner:
+    needs: [start-instance, control-application]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.stop-runner-at-end == 'true' && github.event.inputs.start-runner == 'true'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Stop EC2 instance (but keep it)
+        run: |
+          INSTANCE_ID="${{ needs.start-instance.outputs.instance-id }}"
+          
+          if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "null" ]; then
+            echo "Stopping instance: $INSTANCE_ID"
+            aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance stopped (not deleted)"
+            echo "Instance can be restarted later using control-robot-infra workflow"
+          else
+            echo "⚠️ No instance ID available to stop"
+          fi
+
+  stop-instance:
+    needs: [start-instance, control-application]
+    runs-on: ubuntu-latest
+    if: success() && github.event.inputs.start-runner == 'true'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Stop EC2 instance (but keep it)
+        run: |
+          INSTANCE_ID="${{ needs.start-instance.outputs.instance-id }}"
+          
+          if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "null" ]; then
+            echo "Stopping instance: $INSTANCE_ID"
+            aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance stopped (not deleted)"
+            echo "Instance can be restarted later using control-robot-infra workflow"
+          else
+            echo "⚠️ No instance ID available to stop"
+          fi
+
+# outputs:
+#   instance_id:
+#     description: "EC2 instance ID"
+#     value: ${{ jobs.control-application.outputs.instance_id }}
+#   instance_ip:
+#     description: "EC2 instance IP address"
+#     value: ${{ jobs.control-application.outputs.instance_ip }}
+#   env_initialized:
+#     description: "Whether environment was initialized"
+#     value: ${{ jobs.control-application.outputs.env_initialized }}
+#   execution_status:
+#     description: "Overall command execution status"
+#     value: ${{ jobs.control-application.outputs.execution_status }}
+#   total_commands:
+#     description: "Total number of commands executed"
+#     value: ${{ jobs.control-application.outputs.total_commands }}
+#   successful_commands:
+#     description: "Number of successful commands"
+#     value: ${{ jobs.control-application.outputs.successful_commands }}
+#   failed_commands:
+#     description: "Number of failed commands"
+#     value: ${{ jobs.control-application.outputs.failed_commands }}  
+
+# Add this to keep only the last 3 runs
+  workflow_run_retention:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 3

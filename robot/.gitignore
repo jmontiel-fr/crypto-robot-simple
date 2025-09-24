@@ -1,0 +1,239 @@
+# ===========================================
+# CRYPTO TRADING ROBOT - GITIGNORE
+# ===========================================
+
+# Environment and configuration files
+.env
+
+# API Keys and sensitive data (CRITICAL - NEVER COMMIT)
+*_keys.txt
+api_keys.json
+binance_keys.*
+*_api_key*
+*_secret*
+trading_keys.*
+exchange_credentials.*
+
+# Database files (Contains trading data and PII)
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+data/cryptorobot.db
+src/data/*.db
+robot_state.json
+engine_status.json
+
+# Log files (May contain sensitive trading info)
+logs/
+*.log
+*.log.*
+engine.log
+trading.log
+simulation.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# SSL certificates (Security sensitive)
+certs/*.pem
+certs/*.key
+certs/*.crt
+certs/*.p12
+certs/*.pfx
+!certs/.gitkeep
+!certs/README.md
+
+# Backup files (Database backups contain sensitive data)
+backups/
+*.backup
+*.bak
+backup_*
+*_backup_*
+
+# Temporary files and auto-generated templates
+tmp/
+temp/
+*.tmp
+simulations_template_auto_*.csv
+*_temp.csv
+
+# Process management files
+data/robot.pid
+data/engine_status.json
+*.pid
+
+# Trading state and cache files
+robot_state.json
+portfolio_state.json
+market_data_cache/
+price_cache/
+*.cache
+
+# Calibration history (may contain performance data)
+calibration_history.json
+performance_logs/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ===========================================
+# PROJECT-SPECIFIC IGNORES
+# ===========================================
+
+# Simulation data and results (Can be large and regenerated)
+simulation_results/
+simulation_data/
+historical_data/
+market_data/
+
+# User-specific configuration
+user_config.json
+personal_settings.json
+my_*.csv
+custom_*.json
+
+# Development and testing artifacts
+test_results/
+debug_output/
+performance_analysis/
+*.debug
+*.trace
+
+# Auto-generated documentation
+docs/_build/
+docs/generated/
+
+# Local development overrides
+local_settings.py
+dev_config.json
+development.env
+
+# Windows specific
+*.lnk
+desktop.ini
+
+# macOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux specific
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# ===========================================
+# KEEP THESE FILES (Important for project)
+# ===========================================
+# Core application files - ALWAYS COMMIT:
+# - src/
+# - templates/
+# - simulations_templates/
+# - calibration_profiles/
+# - development_tools/
+# - *.py (main application files)
+# - *.md (documentation)
+# - requirements.txt
+# - .env.example (template for environment variables)
+
+# ===========================================
+# SECURITY REMINDER
+# ===========================================
+# NEVER COMMIT:
+# - Real API keys or secrets
+# - Database files with trading data
+# - Personal trading history
+# - SSL private keys
+# - Backup files with sensitive data

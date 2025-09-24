@@ -1,0 +1,466 @@
+name: build-robot-infra
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Infrastructure action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - apply
+          - plan
+          - destroy
+      auto_approve:
+        description: 'Auto-approve Terraform changes (use with caution)'
+        required: false
+        default: false
+        type: boolean
+      start-runner:
+        description: "Start EC2 instance if not running"
+        required: false
+        default: true
+        type: boolean
+      stop-runner-at-end:
+        description: "Stop the runner at the end of the workflow"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: eu-west-1
+  TF_VERSION: "1.5.0"
+
+jobs:
+  start-instance:
+    name: Start EC2 instance if not running
+    runs-on: ubuntu-latest
+    if: github.event.inputs.start-runner == 'true'
+    outputs:
+      instance-id: ${{ steps.start.outputs.instance-id }}
+      instance-ip: ${{ steps.start.outputs.instance-ip }}
+    steps:
+      - name: Workflow started
+        run: |
+          echo "🚀 Build Robot Infrastructure workflow started"
+          echo "Status: Moving from QUEUED to IN PROGRESS"
+          echo "Timestamp: $(date -u)"
+          echo "Repository: ${{ github.repository }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Waiting 10 seconds to show queue status..."
+          sleep 10
+          
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Start EC2 instance if not running
+        id: start
+        run: |
+          INSTANCE_NAME="runner-jmontiel-fr-crypto-robot"
+          
+          # Get instance ID and current state
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
+            --filters "Name=tag:Name,Values=$INSTANCE_NAME" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text 2>/dev/null)
+          
+          if [ "$INSTANCE_ID" = "None" ]; then
+            echo "❌ Instance not found - will be created by Terraform"
+            echo "instance-id=" >> $GITHUB_OUTPUT
+            echo "instance-ip=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          if [ "$INSTANCE_ID" = "null" ]; then
+            echo "❌ Instance not found - will be created by Terraform"
+            echo "instance-id=" >> $GITHUB_OUTPUT
+            echo "instance-ip=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "❌ Instance not found - will be created by Terraform"
+            echo "instance-id=" >> $GITHUB_OUTPUT
+            echo "instance-ip=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          INSTANCE_STATE=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text)
+          
+          echo "Instance $INSTANCE_ID is currently: $INSTANCE_STATE"
+          
+          if [ "$INSTANCE_STATE" = "stopped" ]; then
+            echo "Starting instance..."
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+            aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance started"
+          elif [ "$INSTANCE_STATE" = "running" ]; then
+            echo "✅ Instance already running"
+          else
+            echo "⚠️ Instance is in state: $INSTANCE_STATE"
+          fi
+          
+          # Get instance IP
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          
+          # Try to get Elastic IP if available
+          EIP_ADDRESS=$(aws ec2 describe-addresses \
+            --region ${{ env.AWS_REGION }} \
+            --filters "Name=instance-id,Values=$INSTANCE_ID" \
+            --query 'Addresses[0].PublicIp' \
+            --output text 2>/dev/null)
+          
+          if [ "$EIP_ADDRESS" != "None" ] && [ "$EIP_ADDRESS" != "null" ] && [ -n "$EIP_ADDRESS" ]; then
+            INSTANCE_IP="$EIP_ADDRESS"
+          fi
+          
+          echo "instance-id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "instance-ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+          echo "Instance IP: $INSTANCE_IP"
+
+  terraform:
+    needs: start-instance
+    runs-on: self-hosted
+    if: always() && (github.event.inputs.start-runner == 'false' || needs.start-instance.result == 'success')
+    outputs:
+      ec2_instance_id: ${{ steps.output.outputs.ec2_instance_id }}
+      ec2_eip_address: ${{ steps.output.outputs.ec2_eip_address }}
+      ssh_key_extracted: ${{ steps.extract_key.outputs.private_key_extracted }}
+      ssh_key_name: ${{ steps.extract_key.outputs.ssh_key_name }}
+    
+    defaults:
+      run:
+        working-directory: terraform
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    # - name: Setup Terraform
+    #   uses: hashicorp/setup-terraform@v3
+    #   with:
+    #     terraform_version: ${{ env.TF_VERSION }}
+        
+    - name: Terraform Format Check
+      id: fmt
+      run: terraform fmt -check -recursive
+      continue-on-error: true
+      
+    - name: Terraform Init
+      id: init
+      run: |
+        echo "Initializing Terraform..."
+        terraform init
+        
+    - name: Terraform Validate
+      id: validate
+      run: |
+        echo "Validating Terraform configuration..."
+        terraform validate
+        
+    - name: Terraform Plan
+      id: plan
+      run: |
+        echo "Creating Terraform plan..."
+        terraform plan -detailed-exitcode -out=tfplan
+      continue-on-error: true
+      
+    - name: Check Plan Status
+      run: |
+        if [ ${{ steps.plan.outputs.exitcode }} -eq 1 ]; then
+          echo "❌ Terraform plan failed"
+          exit 1
+        elif [ ${{ steps.plan.outputs.exitcode }} -eq 2 ]; then
+          echo "📋 Terraform plan has changes"
+        else
+          echo "✅ Terraform plan - no changes"
+        fi
+        
+    - name: Check Apply Conditions
+      if: github.event.inputs.action == 'apply'
+      id: check_apply
+      run: |
+        SHOULD_APPLY="false"
+        if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
+          SHOULD_APPLY="true"
+        fi
+        if [ "${{ steps.plan.outputs.exitcode }}" = "2" ]; then
+          SHOULD_APPLY="true"
+        fi
+        echo "should_apply=${SHOULD_APPLY}" >> $GITHUB_OUTPUT
+        
+    - name: Terraform Apply
+      if: github.event.inputs.action == 'apply' && steps.check_apply.outputs.should_apply == 'true'
+      id: apply
+      run: |
+        echo "Applying Terraform changes..."
+        if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
+          terraform apply -auto-approve tfplan
+        else
+          echo "Plan has changes but auto_approve is false. Skipping apply."
+          echo "To apply changes, re-run with auto_approve=true"
+          exit 1
+        fi
+        
+    - name: Terraform Destroy
+      if: github.event.inputs.action == 'destroy'
+      id: destroy
+      run: |
+        echo "⚠️ Destroying Terraform infrastructure..."
+        if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
+          terraform destroy -auto-approve
+        else
+          echo "Destroy requires auto_approve=true for safety"
+          exit 1
+        fi
+        
+    - name: Terraform Output
+      if: github.event.inputs.action == 'apply' && steps.apply.outcome == 'success'
+      id: output
+      run: |
+        echo "Getting Terraform outputs..."
+        terraform output -json > outputs.json
+        
+        # Extract key outputs with explicit error handling
+        if terraform output -raw ec2_instance_id >/dev/null 2>&1; then
+          EC2_INSTANCE_ID=$(terraform output -raw ec2_instance_id)
+        else
+          EC2_INSTANCE_ID=""
+        fi
+        
+        if terraform output -raw ec2_public_ip >/dev/null 2>&1; then
+          EC2_PUBLIC_IP=$(terraform output -raw ec2_public_ip)
+        else
+          EC2_PUBLIC_IP=""
+        fi
+        
+        if terraform output -raw ec2_eip_address >/dev/null 2>&1; then
+          EC2_EIP_ADDRESS=$(terraform output -raw ec2_eip_address)
+        else
+          EC2_EIP_ADDRESS=""
+        fi
+        
+        if terraform output -raw s3_bucket_name >/dev/null 2>&1; then
+          S3_BUCKET_NAME=$(terraform output -raw s3_bucket_name)
+        else
+          S3_BUCKET_NAME=""
+        fi
+        
+        if terraform output -raw security_group_id >/dev/null 2>&1; then
+          SECURITY_GROUP_ID=$(terraform output -raw security_group_id)
+        else
+          SECURITY_GROUP_ID=""
+        fi
+        
+        # Set outputs for other jobs
+        echo "ec2_instance_id=${EC2_INSTANCE_ID}" >> $GITHUB_OUTPUT
+        echo "ec2_public_ip=${EC2_PUBLIC_IP}" >> $GITHUB_OUTPUT
+        echo "ec2_eip_address=${EC2_EIP_ADDRESS}" >> $GITHUB_OUTPUT
+        echo "s3_bucket_name=${S3_BUCKET_NAME}" >> $GITHUB_OUTPUT
+        echo "security_group_id=${SECURITY_GROUP_ID}" >> $GITHUB_OUTPUT
+        
+    - name: Extract and Store SSH Private Key
+      if: github.event.inputs.action == 'apply' && steps.apply.outcome == 'success'
+      id: extract_key
+      run: |
+        echo "Extracting SSH private key..."
+        
+        # Get the SSH key name
+        SSH_KEY_NAME=$(terraform output -raw ssh_key_name)
+        
+        # Check if the private key file was created by Terraform
+        if [ -f "${SSH_KEY_NAME}.pem" ]; then
+          # Key was created by Terraform, read from file
+          cp "${SSH_KEY_NAME}.pem" ssh-private-key.pem
+          chmod 600 ssh-private-key.pem
+          
+          # Save key name for reference
+          echo "$SSH_KEY_NAME" > ssh-key-name.txt
+          
+          echo "✅ SSH private key extracted and saved to artifact"
+          echo "Key name: $SSH_KEY_NAME"
+          
+          # Store private key content for potential secret update
+          PRIVATE_KEY_CONTENT=$(cat ssh-private-key.pem)
+          echo "PRIVATE_KEY_CONTENT<<EOF" >> $GITHUB_ENV
+          echo "$PRIVATE_KEY_CONTENT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
+          # Set outputs
+          echo "private_key_extracted=true" >> $GITHUB_OUTPUT
+          echo "ssh_key_name=${SSH_KEY_NAME}" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ SSH key file not found: ${SSH_KEY_NAME}.pem"
+          echo "This means either:"
+          echo "  1. create_ssh_key is set to false (using existing key)"
+          echo "  2. Key creation failed"
+          echo "You'll need to provide the private key via GitHub secrets"
+          
+          # Create placeholder files
+          echo "$SSH_KEY_NAME" > ssh-key-name.txt
+          echo "# Private key not available - using existing AWS key pair" > ssh-private-key.pem
+          echo "private_key_extracted=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Upload Terraform State
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-state-${{ github.run_number }}
+        path: |
+          terraform/terraform.tfstate
+          terraform/terraform.tfstate.backup
+          terraform/.terraform.lock.hcl
+        retention-days: 30
+        
+    - name: Upload SSH Private Key
+      if: github.event.inputs.action == 'apply' && steps.apply.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ssh-private-key-${{ github.run_number }}
+        path: |
+          terraform/ssh-private-key.pem
+          terraform/ssh-key-name.txt
+        retention-days: 7
+
+    - name: Update GitHub Secret with Private Key
+      if: github.event.inputs.action == 'apply' && steps.extract_key.outputs.private_key_extracted == 'true'
+      run: |
+        echo "⚠️ SSH private key extracted successfully"
+        echo "To update the GitHub secret EC2_SSH_PRIVATE_KEY, you can:"
+        echo "1. Go to Settings > Secrets and variables > Actions"
+        echo "2. Update or create the EC2_SSH_PRIVATE_KEY secret"
+        echo "3. Use the content from the ssh-private-key.pem artifact"
+        echo ""
+        echo "The private key is available in the workflow artifact: ssh-private-key-${{ github.run_number }}"
+
+    - name: Generate Summary
+      if: always()
+      run: |
+        echo "## Terraform Infrastructure Deployment 🏗️" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Action:** ${{ github.event.inputs.action }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Auto Approve:** ${{ github.event.inputs.auto_approve }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Format check results
+        if [ "${{ steps.fmt.outcome }}" = "failure" ]; then
+          echo "❌ **Format Check:** Failed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "✅ **Format Check:** Passed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Validation results
+        if [ "${{ steps.validate.outcome }}" = "success" ]; then
+          echo "✅ **Validation:** Passed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Validation:** Failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Plan results
+        if [ "${{ steps.plan.outcome }}" = "success" ]; then
+          if [ "${{ steps.plan.outputs.exitcode }}" = "2" ]; then
+            echo "📋 **Plan:** Changes detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **Plan:** No changes" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ **Plan:** Failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Apply/Destroy results
+        if [ "${{ github.event.inputs.action }}" = "apply" ]; then
+          if [ "${{ steps.apply.outcome }}" = "success" ]; then
+            echo "✅ **Apply:** Successful" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Infrastructure Details:" >> $GITHUB_STEP_SUMMARY
+            echo "- **EC2 Instance ID:** \`${{ steps.output.outputs.ec2_instance_id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Public IP:** \`${{ steps.output.outputs.ec2_public_ip }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Elastic IP:** \`${{ steps.output.outputs.ec2_eip_address }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **S3 Bucket:** \`${{ steps.output.outputs.s3_bucket_name }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Security Group:** \`${{ steps.output.outputs.security_group_id }}\`" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.apply.outcome }}" = "failure" ]; then
+            echo "❌ **Apply:** Failed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ **Apply:** Skipped (no auto-approve or no changes)" >> $GITHUB_STEP_SUMMARY
+          fi
+        elif [ "${{ github.event.inputs.action }}" = "destroy" ]; then
+          if [ "${{ steps.destroy.outcome }}" = "success" ]; then
+            echo "✅ **Destroy:** Successful" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.destroy.outcome }}" = "failure" ]; then
+            echo "❌ **Destroy:** Failed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ **Destroy:** Skipped (requires auto-approve)" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ github.event.inputs.action }}" = "apply" ] && [ "${{ steps.apply.outcome }}" = "success" ]; then
+          echo "1. Use **control-robot-infra** workflow to start/stop the EC2 instance" >> $GITHUB_STEP_SUMMARY
+          echo "2. Use **control-robot-aws** workflow to deploy and manage the application" >> $GITHUB_STEP_SUMMARY
+          echo "3. SSH to instance: \`ssh -i web-crypto-robot-key.pem ec2-user@${{ steps.output.outputs.ec2_eip_address }}\`" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ github.event.inputs.action }}" = "plan" ]; then
+          echo "1. Review the plan output above" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run with action=apply and auto_approve=true to apply changes" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  stop-runner:
+    needs: [start-instance, terraform]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.stop-runner-at-end == 'true' && github.event.inputs.start-runner == 'true'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Stop EC2 instance (but keep it)
+        run: |
+          INSTANCE_ID="${{ needs.start-instance.outputs.instance-id }}"
+          
+          if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "null" ]; then
+            echo "Stopping instance: $INSTANCE_ID"
+            aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance stopped (not deleted)"
+            echo "Instance can be restarted later using control-robot-infra workflow"
+          else
+            echo "⚠️ No instance ID available to stop (may have been created by Terraform)"
+          fi
+
+
+    
+# Add this to keep only the last 3 runs
+  workflow_run_retention:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 3

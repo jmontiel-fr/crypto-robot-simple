@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Robot - Simulation List</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #333;
+            margin: 0;
+            font-size: 2.2em;
+            font-weight: 300;
+        }
+        
+        .nav-buttons {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .nav-buttons a {
+            display: inline-block;
+            padding: 12px 24px;
+            margin: 0 10px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+        }
+        
+        .nav-buttons a:hover {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            margin-top: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .simulation-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 800px;
+        }
+        
+        .simulation-table th,
+        .simulation-table td {
+            padding: 12px 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+            white-space: nowrap;
+        }
+        
+        .simulation-table th:first-child,
+        .simulation-table td:first-child {
+            min-width: 150px;
+            white-space: normal;
+        }
+        
+        .simulation-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .simulation-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        
+        .status-running { background: #d4edda; color: #155724; }
+        .status-completed { background: #d1ecf1; color: #0c5460; }
+        .status-failed { background: #f8d7da; color: #721c24; }
+        .status-pending { background: #fff3cd; color: #856404; }
+        
+        .performance-positive { color: #28a745; font-weight: bold; }
+        .performance-negative { color: #dc3545; font-weight: bold; }
+        .fees-column { color: #dc3545; font-weight: 600; }
+        
+        .action-buttons a {
+            display: inline-block;
+            padding: 4px 8px;
+            margin: 1px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+            font-size: 0.8em;
+            transition: background 0.3s ease;
+        }
+        
+        .action-buttons a:hover {
+            background: #5a6fd8;
+        }
+        
+        .action-buttons a.delete {
+            background: #dc3545;
+        }
+        
+        .action-buttons a.delete:hover {
+            background: #c82333;
+        }
+        
+        .no-simulations {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .no-simulations h3 {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Crypto Robot - Simulation List</h1>
+            <p>Daily Rebalance Strategy - Historical Simulations</p>
+        </div>
+        
+        <div class="nav-buttons">
+            <a href="/">🏠 Dashboard</a>
+            <a href="/daily-rebalance">📊 Strategy</a>
+            <a href="/simulator">➕ New Simulation</a>
+            <button onclick="refreshSimulations()" style="padding: 12px 24px; margin: 0 10px; background: #28a745; color: white; border: none; border-radius: 25px; cursor: pointer; transition: all 0.3s ease;">
+                🔄 Refresh
+            </button>
+        </div>
+
+
+        {% if simulation_data %}
+        <div class="table-container">
+            <table class="simulation-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Start Date</th>
+                        <th>Starting Reserve</th>
+                        <th>Final Value (Net)</th>
+                        <th>Total Fees</th>
+                        <th>Performance</th>
+                        <th>Profile</th>
+                        <th>Duration</th>
+                        <th>Cycles</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for data in simulation_data %}
+                    {% set sim = data.simulation %}
+                    <tr>
+                        <td><strong>{{ sim.name }}</strong></td>
+                        <td>
+                            <span class="status-badge status-{{ sim.status }}">
+                                {{ sim.status.upper() }}
+                            </span>
+                        </td>
+                        <td>{{ sim.start_date.strftime('%Y-%m-%d') if sim.start_date else 'Unknown' }}</td>
+                        <td>${{ "%.0f"|format(sim.starting_reserve) }}</td>
+                        <td>
+                            {% if data.final_total_value_net %}
+                                ${{ "%.0f"|format(data.final_total_value_net) }}
+                            {% elif sim.final_total_value %}
+                                ${{ "%.0f"|format(sim.final_total_value) }}
+                            {% else %}
+                                <span style="color: #999;">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if data.calculated_total_fees %}
+                                <span style="color: #dc3545;">-${{ "%.2f"|format(data.calculated_total_fees) }}</span>
+                            {% else %}
+                                <span style="color: #999;">$0.00</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if data.final_total_value_net and sim.starting_reserve %}
+                                {% set performance = ((data.final_total_value_net / sim.starting_reserve - 1) * 100) %}
+                                <span class="{{ 'performance-positive' if performance > 0 else 'performance-negative' }}">
+                                    {{ "+" if performance > 0 else "" }}{{ "%.1f"|format(performance) }}%
+                                </span>
+                            {% elif sim.final_total_value and sim.starting_reserve %}
+                                {% set performance = ((sim.final_total_value / sim.starting_reserve - 1) * 100) %}
+                                <span class="{{ 'performance-positive' if performance > 0 else 'performance-negative' }}">
+                                    {{ "+" if performance > 0 else "" }}{{ "%.1f"|format(performance) }}%
+                                </span>
+                            {% else %}
+                                <span style="color: #999;">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if sim.calibration_profile %}
+                                <span class="badge bg-info">{{ sim.calibration_profile }}</span>
+                            {% else %}
+                                <span class="badge bg-secondary">none</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ sim.duration_days }}d</td>
+                        <td>{{ data.current_cycle or 0 }}</td>
+                        <td class="action-buttons">
+                            <a href="/simulator/{{ sim.id }}/history">📊</a>
+                            {% if sim.status == 'running' %}
+                                <a href="/simulator/{{ sim.id }}/force-complete">⏹️</a>
+                            {% endif %}
+                            <a href="/simulator/{{ sim.id }}/delete" class="delete" 
+                               onclick="return confirm('Delete simulation {{ sim.name }}?')">🗑️</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+            
+            {% if simulation_data|length > 1 %}
+            <div style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                <h4>Bulk Actions</h4>
+                <a href="/simulator/delete-all" 
+                   onclick="return confirm('Delete ALL simulations? This cannot be undone!')"
+                   style="padding: 10px 20px; background: #dc3545; color: white; text-decoration: none; border-radius: 5px;">
+                   🗑️ Delete All Simulations
+                </a>
+            </div>
+            {% endif %}
+            
+        {% else %}
+            <div class="no-simulations">
+                <h3>🧪 No Simulations Yet</h3>
+                <p>Start your first Daily Rebalance simulation to see results here.</p>
+                <a href="/simulator" style="display: inline-block; padding: 15px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 25px; margin-top: 20px;">
+                    ➕ Create First Simulation
+                </a>
+            </div>
+        {% endif %}
+    </div>
+
+    <script>
+        let refreshInterval;
+        
+        function refreshSimulations() {
+            console.log('Refreshing simulations...');
+            window.location.reload();
+        }
+        
+        function startAutoRefresh() {
+            // Auto-refresh every 10 seconds
+            refreshInterval = setInterval(() => {
+                console.log('Auto-refreshing simulations...');
+                window.location.reload();
+            }, 10000);
+        }
+        
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+        
+        // Start auto-refresh when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Starting auto-refresh for simulations');
+            startAutoRefresh();
+        });
+        
+        // Stop auto-refresh when page is about to unload
+        window.addEventListener('beforeunload', function() {
+            stopAutoRefresh();
+        });
+        
+        // Pause auto-refresh when page is not visible
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                stopAutoRefresh();
+            } else {
+                startAutoRefresh();
+            }
+        });
+    </script>
+</body>
+</html>

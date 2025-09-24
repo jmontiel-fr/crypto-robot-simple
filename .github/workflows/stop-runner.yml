@@ -1,0 +1,51 @@
+name: stop-runner
+on: 
+  workflow_dispatch:
+
+concurrency:
+  group: runner-demo-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+            
+  stop-instance:  
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+          
+      - name: Stop EC2 instance (but keep it)
+        run: |
+          INSTANCE_NAME="runner-jmontiel-fr-crypto-robot"
+          
+          # Get instance ID and current state
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region eu-west-1 \
+            --filters "Name=tag:Name,Values=$INSTANCE_NAME" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text 2>/dev/null)
+          
+          if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "null" ]; then
+            echo "Stopping instance: $INSTANCE_ID"
+            aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance stopped (not deleted)"
+            echo "Instance can be restarted later using control-robot-infra workflow"
+          else
+            echo "⚠️ No instance ID available to stop"
+          fi  
+# Add this to keep only the last 3 runs
+  workflow_run_retention:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 3

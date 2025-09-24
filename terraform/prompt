@@ -1,0 +1,11 @@
+create terraform files 
+1. to extract with data the VPC form vpc-id, its public subnets in data.tf
+2. to create variables.tf with vpc-id and an s3bucket name
+3. to create an EC2 instance 
+of type t3.micro with EBS root volume of 100 GB and ssh keys,
+AMI AmazonLinux2023 in eu-west-1 region,
+a security group allowing ssh and https from 3 CIDR,
+an instance profile allowing Readwirte access to S3,
+in a public subnet.
+4. to create an S3 bucket named in variables.tf
+5. an s3 backend

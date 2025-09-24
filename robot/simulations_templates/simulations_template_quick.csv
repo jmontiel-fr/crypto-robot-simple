@@ -1,0 +1,10 @@
+simulation_name,start_date,duration_days,cycle_duration_minutes,starting_capital,strategy,calibration_profile,data_source
+Quick 1.2x Performance Test,2025-02-01,7,1440,100,daily_rebalance,final_1_2x_realistic,binance_historical
+Quick 1.2x Conservative Test,2025-02-01,7,1440,100,daily_rebalance,conservative_realistic,binance_historical
+Quick 1.2x Moderate Test,2025-02-01,7,1440,100,daily_rebalance,moderate_realistic,binance_historical
+Quick 1.2x Aggressive Test,2025-02-01,7,1440,100,daily_rebalance,aggressive_realistic,binance_historical
+Quick 1.2x Precise Test,2025-02-01,7,1440,100,daily_rebalance,precise_1_2x_realistic,binance_historical
+Quick 1.2x Target Test,2025-02-01,7,1440,100,daily_rebalance,target_1_2x_realistic,binance_historical
+Quick Bear Market 1.2x Test,2025-02-01,7,1440,100,daily_rebalance,bear_market_defensive,binance_historical
+Quick High Volatility 1.2x Test,2025-02-01,7,1440,100,daily_rebalance,high_volatility_scalping,binance_historical
+Quick No Calibration Baseline,2025-02-01,7,1440,100,daily_rebalance,none,binance_historical

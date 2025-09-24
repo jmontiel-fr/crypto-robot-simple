@@ -1,0 +1,128 @@
+name: start-runner
+on: 
+  workflow_dispatch:
+
+concurrency:
+  group: runner-demo-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  start-instance:
+    name: Start EC2 instance if not running
+    runs-on: ubuntu-latest
+    outputs:
+      instance-id: ${{ steps.start.outputs.instance-id }}
+      instance-ip: ${{ steps.start.outputs.instance-ip }}
+    steps:
+      - name: Workflow started
+        run: |
+          echo "🚀 Runner Demo Minimal workflow started"
+          echo "Status: Moving from QUEUED to IN PROGRESS"
+          echo "Timestamp: $(date -u)"
+          echo "Repository: ${{ github.repository }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Waiting 10 seconds to show queue status..."
+          sleep 10
+          
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+          
+      - name: Start EC2 instance if not running
+        id: start
+        run: |
+          INSTANCE_NAME="runner-jmontiel-fr-crypto-robot"
+          
+          # Get instance ID and current state
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region eu-west-1 \
+            --filters "Name=tag:Name,Values=$INSTANCE_NAME" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text 2>/dev/null)
+          
+          if [ "$INSTANCE_ID" = "None" ]; then
+            echo "❌ Instance not found"
+            exit 1
+          fi
+          if [ "$INSTANCE_ID" = "null" ]; then
+            echo "❌ Instance not found"
+            exit 1
+          fi
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "❌ Instance not found"
+            exit 1
+          fi
+          
+          INSTANCE_STATE=$(aws ec2 describe-instances \
+            --region eu-west-1 \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text)
+          
+          echo "Instance $INSTANCE_ID is currently: $INSTANCE_STATE"
+          
+          # List ALL running instances to see what else might be running
+          echo ""
+          echo "=== ALL RUNNING EC2 INSTANCES ==="
+          aws ec2 describe-instances \
+            --region eu-west-1 \
+            --filters "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].[InstanceId,Tags[?Key==`Name`].Value|[0],PublicIpAddress,PrivateIpAddress]' \
+            --output table
+          if [ $? -ne 0 ]; then
+            echo "Could not list instances"
+          fi
+          
+          if [ "$INSTANCE_STATE" = "stopped" ]; then
+            echo "Starting instance..."
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+            aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance started"
+          elif [ "$INSTANCE_STATE" = "running" ]; then
+            echo "✅ Instance already running"
+          else
+            echo "⚠️ Instance is in state: $INSTANCE_STATE"
+          fi
+          
+          # Get instance IP
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --region eu-west-1 \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          
+          # Try to get Elastic IP if available
+          EIP_ADDRESS=$(aws ec2 describe-addresses \
+            --region eu-west-1 \
+            --filters "Name=instance-id,Values=$INSTANCE_ID" \
+            --query 'Addresses[0].PublicIp' \
+            --output text 2>/dev/null)
+          
+          if [ "$EIP_ADDRESS" != "None" ] && [ "$EIP_ADDRESS" != "null" ] && [ -n "$EIP_ADDRESS" ]; then
+            INSTANCE_IP="$EIP_ADDRESS"
+          fi
+          
+          echo "instance-id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "instance-ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+          echo "Instance IP: $INSTANCE_IP"
+          echo ""
+          echo "⚠️ Note: EC2 instance started, but GitHub Actions runner service"
+          echo "   must be running on the instance for the next job to work."
+          echo "   If the job fails, SSH to the instance and run:"
+          echo "   cd /opt/github-runner && sudo ./svc.sh start"
+          
+    #Add this to keep only the last 3 runs
+  workflow_run_retention:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 3

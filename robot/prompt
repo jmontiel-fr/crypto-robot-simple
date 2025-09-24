@@ -1,0 +1,16 @@
+has databse evolved and is it integradted in create-databse 
+and start fresh portfolio ?
+
+update Trading_strategies.md files
+
+is the simulation using the same engines as 
+live robot will use the new dynamic strategy ?
+
+are there any strategies that save data in the database and which ones ?
+My question is if I restrat a portfolio execution with a fresh new databse 
+will it run and I loose information from old runs useful for strategies ?
+
+
+If my robot stops for any reason., 
+If I restart it, will it continue to run as normally, 
+with possibly a blank of operation similar to a freze/unfrez period ?

@@ -1,0 +1,18 @@
+{
+  "positions": {
+    "BTCBNB": {
+      "symbol": "BTCBNB",
+      "quantity": "0.12",
+      "entry_price": "15.5",
+      "current_price": "15.5",
+      "entry_time": "2025-09-23T08:23:09.166416",
+      "last_update": "2025-09-23T08:23:09.742345"
+    }
+  },
+  "reserve_balance": "98.138140",
+  "reserve_asset": "BNB",
+  "total_fees_paid": "0.001860",
+  "total_trades": 3,
+  "created_at": "2025-09-23T08:23:09.166416",
+  "last_update": "2025-09-23T08:23:09.745571"
+}

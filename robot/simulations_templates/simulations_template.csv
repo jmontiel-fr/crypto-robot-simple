@@ -1,0 +1,16 @@
+simulation_name,start_date,duration_days,cycle_duration_minutes,starting_capital,strategy,calibration_profile,data_source
+1.2x Performance Target - Standard,2025-02-01,30,1440,100,daily_rebalance,final_1_2x_realistic,binance_historical
+1.2x Performance Target - High Capital,2025-02-01,30,1440,500,daily_rebalance,final_1_2x_realistic,binance_historical
+1.2x Performance Target - Long Term,2025-02-01,60,1440,200,daily_rebalance,final_1_2x_realistic,binance_historical
+1.2x Performance Target - Short Term,2025-02-01,7,1440,50,daily_rebalance,final_1_2x_realistic,binance_historical
+Conservative 1.2x - Low Risk,2025-02-01,30,1440,100,daily_rebalance,conservative_realistic,binance_historical
+Moderate 1.2x - Balanced Risk,2025-02-01,30,1440,100,daily_rebalance,moderate_realistic,binance_historical
+Aggressive 1.2x - Higher Risk,2025-02-01,30,1440,100,daily_rebalance,aggressive_realistic,binance_historical
+Bear Market Defensive 1.2x,2025-02-01,30,1440,100,daily_rebalance,bear_market_defensive,binance_historical
+High Volatility 1.2x,2025-02-01,30,1440,100,daily_rebalance,high_volatility_scalping,binance_historical
+Precise 1.2x Target Test,2025-02-01,30,1440,100,daily_rebalance,precise_1_2x_realistic,binance_historical
+Target 1.2x Baseline Test,2025-02-01,30,1440,100,daily_rebalance,target_1_2x_realistic,binance_historical
+1.2x Low Capital Test,2025-02-01,14,1440,25,daily_rebalance,final_1_2x_realistic,binance_historical
+1.2x Medium Term Test,2025-02-01,45,1440,150,daily_rebalance,final_1_2x_realistic,binance_historical
+1.2x Extended Test,2025-02-01,90,1440,300,daily_rebalance,final_1_2x_realistic,binance_historical
+No Calibration Baseline,2025-02-01,30,1440,100,daily_rebalance,none,binance_historical

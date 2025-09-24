@@ -1,0 +1,44 @@
+[
+  {
+    "transaction_id": "BUY_BTCBNB_20250923_082309",
+    "timestamp": "2025-09-23T08:23:09.166416",
+    "transaction_type": "BUY",
+    "from_asset": "BNB",
+    "to_asset": "BTCBNB",
+    "from_quantity": "0.155155",
+    "to_quantity": "0.01",
+    "price": "15.5",
+    "fee": "0.000155",
+    "fee_asset": "BNB",
+    "status": "COMPLETED",
+    "cycle_number": 1
+  },
+  {
+    "transaction_id": "BUY_BTCBNB_20250923_082309",
+    "timestamp": "2025-09-23T08:23:09.245042",
+    "transaction_type": "BUY",
+    "from_asset": "BNB",
+    "to_asset": "BTCBNB",
+    "from_quantity": "0.155155",
+    "to_quantity": "0.01",
+    "price": "15.5",
+    "fee": "0.000155",
+    "fee_asset": "BNB",
+    "status": "COMPLETED",
+    "cycle_number": 1
+  },
+  {
+    "transaction_id": "BUY_BTCBNB_20250923_082309",
+    "timestamp": "2025-09-23T08:23:09.742345",
+    "transaction_type": "BUY",
+    "from_asset": "BNB",
+    "to_asset": "BTCBNB",
+    "from_quantity": "1.55155",
+    "to_quantity": "0.1",
+    "price": "15.5",
+    "fee": "0.00155",
+    "fee_asset": "BNB",
+    "status": "COMPLETED",
+    "cycle_number": 1
+  }
+]

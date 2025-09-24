@@ -1,0 +1,5 @@
+simulation_name,start_date,duration_days,cycle_duration_minutes,starting_capital,strategy,calibration_profile,data_source
+USDC Protection Demo - Enabled,2025-02-01,7,1440,100,daily_rebalance_with_usdc_protection,none,binance_historical
+USDC Protection Demo - Disabled,2025-02-01,7,1440,100,daily_rebalance,none,binance_historical
+USDC Protection Bear Market Test,2025-12-01,14,1440,100,daily_rebalance_with_usdc_protection,none,binance_historical
+USDC Protection Stress Test,2025-11-01,21,1440,100,daily_rebalance_with_usdc_protection,none,binance_historical

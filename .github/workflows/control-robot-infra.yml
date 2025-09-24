@@ -1,0 +1,440 @@
+# Controls the GitHub Actions runner instance (not the robot application instance)
+# This workflow manages the EC2 instance that serves as the self-hosted runner
+# For robot application management, use control-robot-aws workflow instead
+
+name: control-robot-infra
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'GitHub Actions runner instance action'
+        required: true
+        default: 'status'
+        type: choice
+        options:
+          - start
+          - stop
+          - status
+          - toggle
+      start-runner:
+        description: "Start EC2 instance if not running"
+        required: false
+        default: true
+        type: boolean
+      stop-runner-at-end:
+        description: "Stop the runner at the end of the workflow"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: eu-west-1
+  INSTANCE_NAME: runner-jmontiel-fr-crypto-robot
+
+jobs:
+  start-instance:
+    name: Start GitHub Actions runner instance if not running
+    runs-on: ubuntu-latest
+    if: github.event.inputs.start-runner == 'true'
+    outputs:
+      instance-id: ${{ steps.start.outputs.instance-id }}
+      instance-ip: ${{ steps.start.outputs.instance-ip }}
+    steps:
+      - name: Workflow started
+        run: |
+          echo "🚀 Control GitHub Actions Runner Infrastructure workflow started"
+          echo "Status: Moving from QUEUED to IN PROGRESS"
+          echo "Timestamp: $(date -u)"
+          echo "Repository: ${{ github.repository }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Action: ${{ github.event.inputs.action }}"
+          echo "Waiting 10 seconds to show queue status..."
+          sleep 10
+          
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Start EC2 instance if not running
+        id: start
+        run: |
+          # Get instance ID and current state  
+          INSTANCE_NAME="runner-jmontiel-fr-crypto-robot"
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
+            --filters "Name=tag:Name,Values=$INSTANCE_NAME" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text 2>/dev/null)
+          
+          if [ "$INSTANCE_ID" = "None" ]; then
+            echo "❌ Instance not found"
+            exit 1
+          fi
+          if [ "$INSTANCE_ID" = "null" ]; then
+            echo "❌ Instance not found"
+            exit 1
+          fi
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "❌ Instance not found"
+            exit 1
+          fi
+          
+          INSTANCE_STATE=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text)
+          
+          echo "Instance $INSTANCE_ID is currently: $INSTANCE_STATE"
+          
+          if [ "$INSTANCE_STATE" = "stopped" ]; then
+            echo "Starting instance..."
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+            aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance started"
+          elif [ "$INSTANCE_STATE" = "running" ]; then
+            echo "✅ Instance already running"
+          else
+            echo "⚠️ Instance is in state: $INSTANCE_STATE"
+          fi
+          
+          # Get instance IP
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          
+          # Try to get Elastic IP if available
+          EIP_ADDRESS=$(aws ec2 describe-addresses \
+            --region ${{ env.AWS_REGION }} \
+            --filters "Name=instance-id,Values=$INSTANCE_ID" \
+            --query 'Addresses[0].PublicIp' \
+            --output text 2>/dev/null)
+          
+          if [ "$EIP_ADDRESS" != "None" ] && [ "$EIP_ADDRESS" != "null" ] && [ -n "$EIP_ADDRESS" ]; then
+            INSTANCE_IP="$EIP_ADDRESS"
+          fi
+          
+          echo "instance-id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "instance-ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+          echo "Instance IP: $INSTANCE_IP"
+
+  control-ec2:
+    needs: start-instance
+    runs-on: self-hosted
+    if: always() && (github.event.inputs.start-runner == 'false' || needs.start-instance.result == 'success')
+    outputs:
+      instance_id: ${{ steps.instance_details.outputs.instance_id }}
+      instance_state: ${{ steps.instance_details.outputs.instance_state }}
+      public_ip: ${{ steps.instance_details.outputs.public_ip }}
+      eip_address: ${{ steps.instance_details.outputs.eip_address }}
+      action_performed: ${{ steps.ec2_action.outputs.action_performed }}
+      exit_code: ${{ steps.ec2_action.outputs.exit_code }}
+    
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Execute EC2 control action
+      id: ec2_action
+      continue-on-error: true
+      run: |
+        echo "Executing action: ${{ github.event.inputs.action }}"
+        echo "Region: ${{ env.AWS_REGION }}"
+        
+        # Hardcoded robot instance name
+        ROBOT_INSTANCE_NAME="web-crypto-robot-instance"
+        echo "Target instance: $ROBOT_INSTANCE_NAME"
+        
+        # Get instance ID
+        INSTANCE_ID=$(aws ec2 describe-instances \
+          --region "${{ env.AWS_REGION }}" \
+          --filters "Name=tag:Name,Values=$ROBOT_INSTANCE_NAME" \
+          --query 'Reservations[0].Instances[0].InstanceId' \
+          --output text 2>/dev/null)
+        
+        if [ "$INSTANCE_ID" = "None" ] || [ "$INSTANCE_ID" = "null" ] || [ -z "$INSTANCE_ID" ]; then
+          echo "❌ Robot instance '$ROBOT_INSTANCE_NAME' not found"
+          echo "exit_code=1" >> $GITHUB_OUTPUT
+          echo "action_performed=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        echo "Found instance: $INSTANCE_ID"
+        
+        # Execute the requested action
+        case "${{ github.event.inputs.action }}" in
+          "start")
+            echo "Starting instance $INSTANCE_ID..."
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID" --region "${{ env.AWS_REGION }}"
+            aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "${{ env.AWS_REGION }}"
+            echo "✅ Instance started"
+            ;;
+          "stop")
+            echo "Stopping instance $INSTANCE_ID..."
+            aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "${{ env.AWS_REGION }}"
+            echo "✅ Instance stop initiated"
+            ;;
+          "status")
+            STATE=$(aws ec2 describe-instances \
+              --region "${{ env.AWS_REGION }}" \
+              --instance-ids "$INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].State.Name' \
+              --output text)
+            echo "Instance $INSTANCE_ID is currently: $STATE"
+            ;;
+          "toggle")
+            STATE=$(aws ec2 describe-instances \
+              --region "${{ env.AWS_REGION }}" \
+              --instance-ids "$INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].State.Name' \
+              --output text)
+            
+            if [ "$STATE" = "running" ]; then
+              echo "Instance is running, stopping it..."
+              aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "${{ env.AWS_REGION }}"
+              echo "✅ Instance stop initiated"
+            elif [ "$STATE" = "stopped" ]; then
+              echo "Instance is stopped, starting it..."
+              aws ec2 start-instances --instance-ids "$INSTANCE_ID" --region "${{ env.AWS_REGION }}"
+              aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "${{ env.AWS_REGION }}"
+              echo "✅ Instance started"
+            else
+              echo "Instance is in state: $STATE (cannot toggle)"
+              echo "exit_code=1" >> $GITHUB_OUTPUT
+              echo "action_performed=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+            ;;
+          *)
+            echo "❌ Unknown action: ${{ github.event.inputs.action }}"
+            echo "Available actions: start, stop, status, toggle"
+            echo "exit_code=1" >> $GITHUB_OUTPUT
+            echo "action_performed=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+            exit 1
+            ;;
+        esac
+        
+        # Set success outputs
+        echo "exit_code=0" >> $GITHUB_OUTPUT
+        echo "action_performed=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+        echo "✅ Action completed successfully"
+        
+    - name: Get instance details
+      id: instance_details
+      if: always()
+      run: |
+        # Get instance details for the robot instance
+        set +e
+        
+        # Hardcoded robot instance name
+        ROBOT_INSTANCE_NAME="web-crypto-robot-instance"
+        
+        # Get instance ID
+        INSTANCE_ID=$(aws ec2 describe-instances \
+          --region "${{ env.AWS_REGION }}" \
+          --filters "Name=tag:Name,Values=$ROBOT_INSTANCE_NAME" "Name=instance-state-name,Values=running,stopped,stopping,pending" \
+          --query 'Reservations[0].Instances[0].InstanceId' \
+          --output text 2>/dev/null)
+        
+        if [ "$INSTANCE_ID" != "None" ] && [ "$INSTANCE_ID" != "null" ] && [ -n "$INSTANCE_ID" ]; then
+          # Get instance state
+          INSTANCE_STATE=$(aws ec2 describe-instances \
+            --region "${{ env.AWS_REGION }}" \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text 2>/dev/null)
+          
+          # Get public IP
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --region "${{ env.AWS_REGION }}" \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text 2>/dev/null)
+          
+          # Get Elastic IP
+          EIP_ADDRESS=$(aws ec2 describe-addresses \
+            --region "${{ env.AWS_REGION }}" \
+            --filters "Name=instance-id,Values=$INSTANCE_ID" \
+            --query 'Addresses[0].PublicIp' \
+            --output text 2>/dev/null)
+          
+          echo "instance_id=${INSTANCE_ID}" >> $GITHUB_OUTPUT
+          echo "instance_state=${INSTANCE_STATE}" >> $GITHUB_OUTPUT
+          echo "public_ip=${PUBLIC_IP}" >> $GITHUB_OUTPUT
+          echo "eip_address=${EIP_ADDRESS}" >> $GITHUB_OUTPUT
+        else
+          echo "instance_id=not_found" >> $GITHUB_OUTPUT
+          echo "instance_state=not_found" >> $GITHUB_OUTPUT
+          echo "public_ip=not_found" >> $GITHUB_OUTPUT
+          echo "eip_address=not_found" >> $GITHUB_OUTPUT
+        fi
+        
+        set -e
+        
+    - name: Generate Summary
+      if: always()
+      run: |
+        echo "## EC2 Instance Control 🖥️" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Action Requested:** ${{ github.event.inputs.action }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Instance Name:** ${{ env.INSTANCE_NAME }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Action result
+        if [ "${{ steps.ec2_action.outcome }}" = "success" ]; then
+          echo "✅ **Action Result:** Successful" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Action Result:** Failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Instance details
+        if [ "${{ steps.instance_details.outputs.instance_id }}" != "not_found" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Instance Details:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instance ID:** \`${{ steps.instance_details.outputs.instance_id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Current State:** \`${{ steps.instance_details.outputs.instance_state }}\`" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.instance_details.outputs.public_ip }}" != "None" ] && [ "${{ steps.instance_details.outputs.public_ip }}" != "null" ] && [ -n "${{ steps.instance_details.outputs.public_ip }}" ]; then
+            echo "- **Public IP:** \`${{ steps.instance_details.outputs.public_ip }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.instance_details.outputs.eip_address }}" != "None" ] && [ "${{ steps.instance_details.outputs.eip_address }}" != "null" ] && [ -n "${{ steps.instance_details.outputs.eip_address }}" ]; then
+            echo "- **Elastic IP:** \`${{ steps.instance_details.outputs.eip_address }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # SSH command if instance is running
+          if [ "${{ steps.instance_details.outputs.instance_state }}" = "running" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### SSH Access:" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ steps.instance_details.outputs.eip_address }}" != "None" ] && [ "${{ steps.instance_details.outputs.eip_address }}" != "null" ] && [ -n "${{ steps.instance_details.outputs.eip_address }}" ]; then
+              echo '```bash' >> $GITHUB_STEP_SUMMARY
+              echo 'ssh -i web-crypto-robot-key.pem ec2-user@${{ steps.instance_details.outputs.eip_address }}' >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ steps.instance_details.outputs.public_ip }}" != "None" ] && [ "${{ steps.instance_details.outputs.public_ip }}" != "null" ] && [ -n "${{ steps.instance_details.outputs.public_ip }}" ]; then
+              echo '```bash' >> $GITHUB_STEP_SUMMARY
+              echo 'ssh -i web-crypto-robot-key.pem ec2-user@${{ steps.instance_details.outputs.public_ip }}' >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+        else
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Instance Status:** Instance not found or not accessible" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Next steps
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ steps.instance_details.outputs.instance_state }}" = "running" ]; then
+          echo "1. Use **control-robot-aws** workflow to manage the application" >> $GITHUB_STEP_SUMMARY
+          echo "2. SSH to the instance to perform manual operations" >> $GITHUB_STEP_SUMMARY
+          echo "3. Use **stop** action when done to save costs" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.instance_details.outputs.instance_state }}" = "stopped" ]; then
+          echo "1. Use **start** action to boot up the instance" >> $GITHUB_STEP_SUMMARY
+          echo "2. Wait for instance to be fully running before deploying applications" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ github.event.inputs.action }}" = "status" ]; then
+          echo "1. Use **start** to boot up the instance" >> $GITHUB_STEP_SUMMARY
+          echo "2. Use **stop** to shut down the instance" >> $GITHUB_STEP_SUMMARY
+          echo "3. Use **toggle** to switch between running/stopped states" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Show execution output if available
+        if [ -f "terraform/ec2_output.txt" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Execution Output:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat terraform/ec2_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        fi
+
+  stop-runner:
+    needs: [start-instance, control-ec2]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.stop-runner-at-end == 'true' && github.event.inputs.start-runner == 'true'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Stop EC2 instance (but keep it)
+        run: |
+          INSTANCE_ID="${{ needs.start-instance.outputs.instance-id }}"
+          
+          if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "null" ]; then
+            echo "Stopping instance: $INSTANCE_ID"
+            aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance stopped (not deleted)"
+            echo "Instance can be restarted later using control-robot-infra workflow"
+          else
+            echo "⚠️ No instance ID available to stop"
+          fi
+
+  stop-instance:
+    needs: [start-instance, control-ec2]
+    runs-on: ubuntu-latest
+    if: success() && github.event.inputs.start-runner == 'true'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Stop EC2 instance (but keep it)
+        run: |
+          INSTANCE_ID="${{ needs.start-instance.outputs.instance-id }}"
+          
+          if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "null" ]; then
+            echo "Stopping instance: $INSTANCE_ID"
+            aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+            echo "✅ Instance stopped (not deleted)"
+            echo "Instance can be restarted later using control-robot-infra workflow"
+          else
+            echo "⚠️ No instance ID available to stop"
+          fi
+
+# outputs:
+#   instance_id:
+#     description: "EC2 instance ID"
+#     value: ${{ jobs.control-ec2.outputs.instance_id }}
+#   instance_state:
+#     description: "Current EC2 instance state"
+#     value: ${{ jobs.control-ec2.outputs.instance_state }}
+#   public_ip:
+#     description: "EC2 public IP address"
+#     value: ${{ jobs.control-ec2.outputs.public_ip }}
+#   eip_address:
+#     description: "EC2 Elastic IP address"
+#     value: ${{ jobs.control-ec2.outputs.eip_address }}
+#   action_performed:
+#     description: "Action that was performed"
+#     value: ${{ jobs.control-ec2.outputs.action_performed }}
+#   exit_code:
+#     description: "Exit code of the control script"
+#     value: ${{ jobs.control-ec2.outputs.exit_code }} 
+ # Add this to keep only the last 3 runs
+  workflow_run_retention:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 3

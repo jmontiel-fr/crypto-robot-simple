@@ -1,0 +1,12 @@
+I want to simplify my robot deployments and not use docker.
+So, I want :
+1. to delete local docker generation and related unuseful files
+2. delete build image workflow
+3. Adapt  workflows to deploy the robot and webapp python 
+code using a git clone command on target EC2
+4. To inject Binance API keys definitions form Github secrets 
+in .env when pushing the .env file 
+to AWS. For local testing the .env already contains these keys.
+The Binance API key fis file defintion will bee stored manually in a GH secret named
+<HOST>_KEYS like JACK_ROBOT_CRYPRO_KEYS.
+5. to update all requiremenst, design, tasks and documentation files
